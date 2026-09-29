@@ -1,9 +1,19 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import { UnoCard } from './UnoCard';
 import type { Player, PlayerGameState, Card, CardColor } from '@/types/room';
+
+// Helper determinista para rotación de cartas sobre la mesa (-5° a +5°)
+function getCardRotation(cardId: string): number {
+  let hash = 0;
+  for (let i = 0; i < cardId.length; i++) {
+    hash = (hash << 5) - hash + cardId.charCodeAt(i);
+    hash |= 0;
+  }
+  return (Math.abs(hash) % 11) - 5;
+}
 
 interface GameBoardProps {
   gameState: PlayerGameState;
@@ -153,10 +163,275 @@ export function GameBoard({
   // Selección de color para comodines (+4 / wild)
   const [pendingWildCardId, setPendingWildCardId] = useState<string | null>(null);
 
-  const handleCardClick = (card: Card) => {
-    if (!canPlay(card)) return;
+  // Referencias físicas del DOM para calcular trayectorias reales en pantalla
+  const deckPileRef = useRef<HTMLDivElement>(null);
+  const discardPileRef = useRef<HTMLDivElement>(null);
+  const handContainerRef = useRef<HTMLDivElement>(null);
+
+  // Estados para animaciones dinámicas de cartas
+  const [playingCardId, setPlayingCardId] = useState<string | null>(null);
+  const [isDeckSpring, setIsDeckSpring] = useState(false);
+  const [newCardIds, setNewCardIds] = useState<Set<string>>(new Set());
+  const prevHandIdsRef = useRef<Set<string>>(
+    new Set(gameState.myHand.map((c) => c.id))
+  );
+
+  // Carta en vuelo físico al jugar (sin clipping por overflow, trayectoria real)
+  const [flyingPlayCard, setFlyingPlayCard] = useState<{
+    card: Card;
+    startX: number;
+    startY: number;
+    width: number;
+    height: number;
+    deltaX: number;
+    deltaY: number;
+    targetRotation: number;
+    isTarget: boolean;
+  } | null>(null);
+
+  // Carta en vuelo físico al robar (viaja del mazo a la mano)
+  const [flyingDrawCard, setFlyingDrawCard] = useState<{
+    startX: number;
+    startY: number;
+    width: number;
+    height: number;
+    deltaX: number;
+    deltaY: number;
+    isTarget: boolean;
+  } | null>(null);
+
+  // Pila de descarte con profundidad 3D y slam
+  const [discardHistory, setDiscardHistory] = useState<Card[]>([]);
+  const prevTopCardRef = useRef<Card | null>(null);
+
+  // Oponentes robando cartas (+1, +2, +4)
+  const [opponentPops, setOpponentPops] = useState<Record<string, string>>({});
+  const prevOpponentsRef = useRef<Map<string, number>>(
+    new Map(gameState.opponents.map((o) => [o.id, o.cardCount]))
+  );
+
+  // Animación al revertir sentido
+  const [isDirectionSpinning, setIsDirectionSpinning] = useState(false);
+  const prevDirectionRef = useRef(gameState.direction);
+
+  // Resplandor expansivo al cambiar de color (comodín)
+  const [isColorChanging, setIsColorChanging] = useState(false);
+  const prevColorRef = useRef(gameState.currentColor);
+
+  // Detectar cambio de carta superior y poblar historial para profundidad 3D
+  useEffect(() => {
+    if (!prevTopCardRef.current) {
+      prevTopCardRef.current = gameState.topCard;
+      return;
+    }
+    if (prevTopCardRef.current.id !== gameState.topCard.id) {
+      setDiscardHistory((prev) => [
+        prevTopCardRef.current!,
+        ...prev.slice(0, 1),
+      ]);
+      prevTopCardRef.current = gameState.topCard;
+    }
+  }, [gameState.topCard]);
+
+  // Detectar cartas nuevas en la mano para animación de entrada
+  useEffect(() => {
+    const currentIds = new Set(gameState.myHand.map((c) => c.id));
+    const newlyAdded: string[] = [];
+
+    for (const card of gameState.myHand) {
+      if (!prevHandIdsRef.current.has(card.id)) {
+        newlyAdded.push(card.id);
+      }
+    }
+
+    if (newlyAdded.length > 0) {
+      setNewCardIds(new Set(newlyAdded));
+      const timer = setTimeout(() => {
+        setNewCardIds(new Set());
+      }, 1200);
+      prevHandIdsRef.current = currentIds;
+      return () => clearTimeout(timer);
+    } else {
+      prevHandIdsRef.current = currentIds;
+    }
+  }, [gameState.myHand]);
+
+  // Detectar robo de cartas de oponentes
+  useEffect(() => {
+    const newPops: Record<string, string> = {};
+    let hasNewPops = false;
+    let targetOpponentId: string | null = null;
+
+    gameState.opponents.forEach((opp) => {
+      const prevCount = prevOpponentsRef.current.get(opp.id);
+      if (prevCount !== undefined && opp.cardCount > prevCount) {
+        const diff = opp.cardCount - prevCount;
+        newPops[opp.id] = `+${diff} 🂠`;
+        hasNewPops = true;
+        targetOpponentId = opp.id;
+      }
+      prevOpponentsRef.current.set(opp.id, opp.cardCount);
+    });
+
+    if (hasNewPops) {
+      setOpponentPops((prev) => ({ ...prev, ...newPops }));
+      setIsDeckSpring(true);
+      setTimeout(() => setIsDeckSpring(false), 300);
+
+      if (targetOpponentId && deckPileRef.current) {
+        const oppEl = document.getElementById(`opponent-badge-${targetOpponentId}`);
+        const deckEl = deckPileRef.current;
+        if (oppEl && deckEl) {
+          const deckRect = deckEl.getBoundingClientRect();
+          const oppRect = oppEl.getBoundingClientRect();
+          const deltaX =
+            oppRect.left + oppRect.width / 2 - deckRect.left - deckRect.width / 2;
+          const deltaY =
+            oppRect.top + oppRect.height / 2 - deckRect.top - deckRect.height / 2;
+
+          setFlyingDrawCard({
+            startX: deckRect.left,
+            startY: deckRect.top,
+            width: deckRect.width,
+            height: deckRect.height,
+            deltaX,
+            deltaY,
+            isTarget: false,
+          });
+
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              setFlyingDrawCard((prev) =>
+                prev ? { ...prev, isTarget: true } : null
+              );
+            });
+          });
+
+          setTimeout(() => {
+            setFlyingDrawCard(null);
+          }, 360);
+        }
+      }
+
+      const timer = setTimeout(() => {
+        setOpponentPops({});
+      }, 1300);
+      return () => clearTimeout(timer);
+    }
+  }, [gameState.opponents]);
+
+  // Detectar giro al revertir sentido
+  useEffect(() => {
+    if (prevDirectionRef.current !== gameState.direction) {
+      setIsDirectionSpinning(true);
+      prevDirectionRef.current = gameState.direction;
+      const timer = setTimeout(() => setIsDirectionSpinning(false), 700);
+      return () => clearTimeout(timer);
+    }
+  }, [gameState.direction]);
+
+  // Detectar cambio de color
+  useEffect(() => {
+    if (prevColorRef.current !== gameState.currentColor) {
+      setIsColorChanging(true);
+      prevColorRef.current = gameState.currentColor;
+      const timer = setTimeout(() => setIsColorChanging(false), 600);
+      return () => clearTimeout(timer);
+    }
+  }, [gameState.currentColor]);
+
+  // Manejo de robo propio con animación física real desde el mazo hacia la mano
+  const handleLocalDraw = () => {
+    if (!isMyTurn || gameState.winner || flyingDrawCard) return;
+
+    setIsDeckSpring(true);
+    setTimeout(() => setIsDeckSpring(false), 300);
+
+    const deckEl = deckPileRef.current;
+    const handEl = handContainerRef.current;
+
+    if (deckEl && handEl) {
+      const deckRect = deckEl.getBoundingClientRect();
+      const handRect = handEl.getBoundingClientRect();
+
+      // Destino: hacia el centro de la mano del jugador
+      const targetX = handRect.left + handRect.width / 2 - deckRect.width / 2;
+      const targetY = handRect.bottom - deckRect.height - 10;
+
+      const deltaX = targetX - deckRect.left;
+      const deltaY = targetY - deckRect.top;
+
+      setFlyingDrawCard({
+        startX: deckRect.left,
+        startY: deckRect.top,
+        width: deckRect.width,
+        height: deckRect.height,
+        deltaX,
+        deltaY,
+        isTarget: false,
+      });
+
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          setFlyingDrawCard((prev) => (prev ? { ...prev, isTarget: true } : null));
+        });
+      });
+
+      setTimeout(() => {
+        onDrawCard();
+        setFlyingDrawCard(null);
+      }, 340);
+    } else {
+      onDrawCard();
+    }
+  };
+
+  // Manejo de jugar carta con animación física real desde la mano hacia el descarte
+  const handleCardClick = (card: Card, e?: React.MouseEvent<HTMLElement>) => {
+    if (!canPlay(card) || flyingPlayCard) return;
+
     if (card.color === 'wild' || card.type === 'wild4' || card.type === 'wild') {
       setPendingWildCardId(card.id);
+      return;
+    }
+
+    const cardEl = e?.currentTarget || document.getElementById(`hand-card-${card.id}`);
+    const discardEl = discardPileRef.current;
+
+    if (cardEl && discardEl) {
+      const cardRect = cardEl.getBoundingClientRect();
+      const discardRect = discardEl.getBoundingClientRect();
+
+      const deltaX =
+        discardRect.left + (discardRect.width - cardRect.width) / 2 - cardRect.left;
+      const deltaY =
+        discardRect.top + (discardRect.height - cardRect.height) / 2 - cardRect.top;
+      const targetRotation = getCardRotation(card.id);
+
+      setPlayingCardId(card.id);
+      setFlyingPlayCard({
+        card,
+        startX: cardRect.left,
+        startY: cardRect.top,
+        width: cardRect.width,
+        height: cardRect.height,
+        deltaX,
+        deltaY,
+        targetRotation,
+        isTarget: false,
+      });
+
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          setFlyingPlayCard((prev) => (prev ? { ...prev, isTarget: true } : null));
+        });
+      });
+
+      setTimeout(() => {
+        onPlayCard(card.id);
+        setFlyingPlayCard(null);
+        setPlayingCardId(null);
+      }, 340);
     } else {
       onPlayCard(card.id);
     }
@@ -164,8 +439,50 @@ export function GameBoard({
 
   const handleSelectColor = (color: CardColor) => {
     if (pendingWildCardId) {
-      onPlayCard(pendingWildCardId, color);
+      const targetId = pendingWildCardId;
       setPendingWildCardId(null);
+
+      const card = gameState.myHand.find((c) => c.id === targetId);
+      const cardEl = document.getElementById(`hand-card-${targetId}`);
+      const discardEl = discardPileRef.current;
+
+      if (card && cardEl && discardEl) {
+        const cardRect = cardEl.getBoundingClientRect();
+        const discardRect = discardEl.getBoundingClientRect();
+
+        const deltaX =
+          discardRect.left + (discardRect.width - cardRect.width) / 2 - cardRect.left;
+        const deltaY =
+          discardRect.top + (discardRect.height - cardRect.height) / 2 - cardRect.top;
+        const targetRotation = getCardRotation(targetId);
+
+        setPlayingCardId(targetId);
+        setFlyingPlayCard({
+          card,
+          startX: cardRect.left,
+          startY: cardRect.top,
+          width: cardRect.width,
+          height: cardRect.height,
+          deltaX,
+          deltaY,
+          targetRotation,
+          isTarget: false,
+        });
+
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            setFlyingPlayCard((prev) => (prev ? { ...prev, isTarget: true } : null));
+          });
+        });
+
+        setTimeout(() => {
+          onPlayCard(targetId, color);
+          setFlyingPlayCard(null);
+          setPlayingCardId(null);
+        }, 340);
+      } else {
+        onPlayCard(targetId, color);
+      }
     }
   };
 
@@ -273,7 +590,11 @@ export function GameBoard({
                 {activeColorInfo.label}
               </span>
               <span
-                className="text-neutral-500 font-mono text-base"
+                className={`font-mono text-base inline-block transition-transform duration-300 ${
+                  isDirectionSpinning
+                    ? 'animate-reverse-spin text-cyan-300'
+                    : 'text-neutral-500'
+                }`}
                 title={`Sentido ${
                   gameState.direction === 'CLOCKWISE' ? 'horario' : 'antihorario'
                 }`}
@@ -344,6 +665,7 @@ export function GameBoard({
 
           return (
             <div
+              id={`opponent-badge-${opponent.id}`}
               key={opponent.id}
               className={`relative flex items-center gap-3 p-2.5 sm:p-3 rounded-2xl transition-all duration-300 ${
                 isOpponentTurn
@@ -351,6 +673,14 @@ export function GameBoard({
                   : 'bg-[#070c17]/80 border border-[#182845]'
               }`}
             >
+              {/* Indicador flotante cuando el rival roba cartas */}
+              {opponentPops[opponent.id] && (
+                <div className="absolute -top-7 left-1/2 -translate-x-1/2 z-30 pointer-events-none animate-badge-pop whitespace-nowrap">
+                  <span className="px-2.5 py-0.5 rounded-full bg-red-600 border border-red-300 text-white font-black text-xs shadow-[0_0_12px_#ef4444]">
+                    {opponentPops[opponent.id]}
+                  </span>
+                </div>
+              )}
               {/* Avatar con inicial */}
               <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-[#0051b3] to-[#00b4d8] flex items-center justify-center font-black text-sm text-neutral-950 shadow-md">
                 {opponent.name.charAt(0).toUpperCase()}
@@ -408,11 +738,14 @@ export function GameBoard({
         <div className="absolute w-80 sm:w-96 h-48 sm:h-56 rounded-full bg-gradient-to-r from-red-600/10 via-blue-600/10 to-green-600/10 blur-3xl pointer-events-none" />
 
         <div className="relative z-10 flex items-center justify-center gap-4 sm:gap-10 p-5 sm:p-8 rounded-3xl bg-[#091122]/70 border-2 border-[#162744] shadow-2xl backdrop-blur-md">
-          {/* Mazo de Robo (Interactivo cuando es tu turno) */}
+          {/* Mazo de Robo (Interactivo cuando es tu turno con resorte) */}
           <div className="flex flex-col items-center gap-2">
             <div
-              onClick={isMyTurn && !gameState.winner ? onDrawCard : undefined}
+              ref={deckPileRef}
+              onClick={isMyTurn && !gameState.winner ? handleLocalDraw : undefined}
               className={`relative group ${
+                isDeckSpring ? 'animate-deck-spring' : ''
+              } ${
                 isMyTurn && !gameState.winner
                   ? 'cursor-pointer hover:scale-105 active:scale-95'
                   : 'cursor-default opacity-85'
@@ -509,19 +842,48 @@ export function GameBoard({
             </span>
           </div>
 
-          {/* Pila de Descarte (Carta superior visible) */}
+          {/* Pila de Descarte (Carta superior visible con slam y profundidad 3D) */}
           <div className="flex flex-col items-center gap-2">
-            <div className="relative">
-              {/* Resplandor del color de la carta actual */}
+            <div ref={discardPileRef} className="relative">
+              {/* Resplandor del color de la carta actual con pulso al cambiar */}
               <div
-                className="absolute inset-0 rounded-2xl filter blur-xl opacity-50"
+                className={`absolute inset-0 rounded-2xl filter blur-xl transition-all duration-500 ${
+                  isColorChanging
+                    ? 'animate-color-burst opacity-85 scale-125'
+                    : 'opacity-50'
+                }`}
                 style={{ backgroundColor: activeColorInfo.glow }}
               />
-              <UnoCard
-                card={gameState.topCard}
-                size="md"
-                className="relative shadow-2xl"
-              />
+
+              {/* Cartas anteriores debajo en la pila de descarte para profundidad física */}
+              {discardHistory.map((oldCard, idx) => (
+                <div
+                  key={`prev-discard-${oldCard.id}-${idx}`}
+                  className="absolute inset-0 pointer-events-none opacity-60"
+                  style={{
+                    transform: `rotate(${getCardRotation(oldCard.id)}deg) translate(${
+                      idx === 0 ? -3 : 3
+                    }px, ${idx === 0 ? 2 : -2}px)`,
+                  }}
+                >
+                  <UnoCard card={oldCard} size="md" />
+                </div>
+              ))}
+
+              {/* Carta superior activa con animación de impacto / slam */}
+              <div
+                key={gameState.topCard.id}
+                className="relative shadow-2xl animate-card-slam"
+                style={{
+                  '--card-rot': `${getCardRotation(gameState.topCard.id)}deg`,
+                } as React.CSSProperties}
+              >
+                <UnoCard
+                  card={gameState.topCard}
+                  size="md"
+                  className="relative"
+                />
+              </div>
             </div>
             <span
               className={`text-[11px] font-bold uppercase tracking-wider ${activeColorInfo.text}`}
@@ -579,22 +941,61 @@ export function GameBoard({
         </div>
 
         {/* Abanico interactivo de cartas del jugador */}
-        <div className="w-full max-w-4xl overflow-x-auto pb-4 pt-2 px-4 flex justify-center items-center gap-1 sm:gap-2">
-          {gameState.myHand.map((card) => {
+        <div
+          ref={handContainerRef}
+          className="w-full max-w-4xl overflow-x-auto pb-4 pt-4 px-4 flex justify-center items-end gap-1 sm:gap-2 min-h-[145px]"
+        >
+          {gameState.myHand.map((card, index) => {
             const playable = canPlay(card);
+            const isNew = newCardIds.has(card.id);
+            const isBeingPlayed = playingCardId === card.id;
+
+            // Dinámica de abanico natural
+            const total = gameState.myHand.length;
+            const mid = (total - 1) / 2;
+            const offset = total > 1 ? index - mid : 0;
+            const maxAngle = Math.min(22, total * 2.5);
+            const rot =
+              total > 1 && total <= 14 ? (offset / (mid || 1)) * (maxAngle / 2) : 0;
+            const yOffset = Math.abs(offset) * 1.5;
 
             return (
               <div
+                id={`hand-card-${card.id}`}
                 key={card.id}
-                onClick={() => playable && handleCardClick(card)}
-                className={`transition-all duration-200 transform ${
-                  playable
-                    ? '-translate-y-2 hover:-translate-y-6 hover:scale-115 cursor-pointer ring-2 ring-cyan-400/80 rounded-xl shadow-[0_8px_20px_rgba(0,180,216,0.35)]'
+                onClick={(e) =>
+                  playable && !isBeingPlayed && handleCardClick(card, e)
+                }
+                className={`group relative transition-all duration-200 transform origin-bottom ${
+                  isBeingPlayed
+                    ? 'invisible pointer-events-none'
+                    : isNew
+                    ? 'animate-card-enter'
+                    : ''
+                } ${
+                  iAmVulnerable && total === 1
+                    ? 'animate-card-vibrate ring-4 ring-red-500 rounded-xl shadow-[0_0_20px_#ef4444]'
+                    : playable
+                    ? 'cursor-grab active:cursor-grabbing -translate-y-2 hover:-translate-y-8 hover:scale-120 hover:rotate-0 hover:z-40 active:scale-125 active:-translate-y-10 active:brightness-110 ring-2 ring-cyan-400/80 rounded-xl shadow-[0_8px_20px_rgba(0,180,216,0.35)] active:shadow-[0_20px_35px_rgba(0,180,216,0.6)]'
                     : isMyTurn
                     ? 'opacity-40 cursor-not-allowed hover:opacity-60'
                     : 'opacity-85 cursor-default'
                 }`}
+                style={{
+                  transform: isBeingPlayed
+                    ? undefined
+                    : isNew
+                    ? undefined
+                    : `translateY(${yOffset}px) rotate(${rot}deg)`,
+                  zIndex: index + 5,
+                }}
               >
+                {/* Indicador de carta recién robada */}
+                {isNew && (
+                  <span className="absolute -top-3.5 inset-x-0 mx-auto w-max px-1.5 py-0.5 rounded-full bg-cyan-400 text-black text-[8px] font-black uppercase tracking-wider animate-bounce shadow-md pointer-events-none z-50">
+                    ¡Nueva!
+                  </span>
+                )}
                 <UnoCard card={card} size="sm" isPlayable={playable} />
               </div>
             );
@@ -693,6 +1094,56 @@ export function GameBoard({
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ============================================================ */}
+      {/* CARTA EN VUELO FÍSICO AL JUGAR DESDE LA MANO A LA MESA       */}
+      {/* (Renderizada en fixed root: 100% visible, sin clipping)       */}
+      {/* ============================================================ */}
+      {flyingPlayCard && (
+        <div
+          className="fixed pointer-events-none z-[100] transition-all select-none"
+          style={{
+            left: `${flyingPlayCard.startX}px`,
+            top: `${flyingPlayCard.startY}px`,
+            width: `${flyingPlayCard.width}px`,
+            height: `${flyingPlayCard.height}px`,
+            transform: flyingPlayCard.isTarget
+              ? `translate(${flyingPlayCard.deltaX}px, ${flyingPlayCard.deltaY}px) scale(1.18) rotate(${flyingPlayCard.targetRotation}deg)`
+              : `translate(0px, -24px) scale(1.12) rotate(-5deg)`,
+            filter: flyingPlayCard.isTarget
+              ? 'drop-shadow(0 6px 12px rgba(0,0,0,0.6))'
+              : 'drop-shadow(0 25px 35px rgba(0,0,0,0.85))',
+            transitionProperty: 'transform, filter',
+            transitionDuration: '340ms',
+            transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
+          }}
+        >
+          <UnoCard card={flyingPlayCard.card} size="sm" />
+        </div>
+      )}
+
+      {/* ============================================================ */}
+      {/* CARTA EN VUELO FÍSICO AL ROBAR DEL MAZO                       */}
+      {/* ============================================================ */}
+      {flyingDrawCard && (
+        <div
+          className="fixed pointer-events-none z-[100] transition-all select-none drop-shadow-2xl"
+          style={{
+            left: `${flyingDrawCard.startX}px`,
+            top: `${flyingDrawCard.startY}px`,
+            width: `${flyingDrawCard.width}px`,
+            height: `${flyingDrawCard.height}px`,
+            transform: flyingDrawCard.isTarget
+              ? `translate(${flyingDrawCard.deltaX}px, ${flyingDrawCard.deltaY}px) scale(0.9) rotate(0deg)`
+              : `translate(0px, 0px) scale(1.08) rotate(-4deg)`,
+            transitionProperty: 'transform, filter',
+            transitionDuration: '340ms',
+            transitionTimingFunction: 'cubic-bezier(0.2, 0.8, 0.25, 1)',
+          }}
+        >
+          <UnoCard isFaceDown size="md" />
         </div>
       )}
     </div>

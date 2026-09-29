@@ -50,7 +50,7 @@ export function UnoCard({
       onClick={isPlayable ? onClick : undefined}
       className={`${sizeClasses} ${className} relative rounded-xl transition-all duration-200 select-none ${
         isPlayable
-          ? 'cursor-pointer hover:-translate-y-3 hover:scale-105 hover:shadow-[0_10px_20px_rgba(0,180,216,0.35)]'
+          ? 'cursor-grab active:cursor-grabbing hover:-translate-y-3 hover:scale-105 hover:shadow-[0_10px_20px_rgba(0,180,216,0.35)]'
           : 'cursor-default'
       }`}
     >
