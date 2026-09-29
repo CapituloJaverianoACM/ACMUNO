@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import { UnoCard } from './UnoCard';
+import { soundManager } from '@/lib/sound';
 import type { Player, PlayerGameState, Card, CardColor, OpponentState } from '@/types/room';
 
 // Helper determinista para rotación de cartas sobre la mesa (-5° a +5°)
@@ -236,6 +237,20 @@ export function GameBoard({
     new Map(gameState.opponents.map((o) => [o.id, o.cardCount]))
   );
 
+  // Control de sonido y timestamps de acciones locales para evitar duplicar sonido
+  const [isMuted, setIsMuted] = useState(false);
+  const lastLocalPlayTimeRef = useRef<number>(0);
+  const lastLocalDrawTimeRef = useRef<number>(0);
+
+  useEffect(() => {
+    setIsMuted(soundManager.getMuted());
+  }, []);
+
+  const handleToggleSound = () => {
+    const muted = soundManager.toggleMute();
+    setIsMuted(muted);
+  };
+
   // Animación al revertir sentido
   const [isDirectionSpinning, setIsDirectionSpinning] = useState(false);
   const prevDirectionRef = useRef(gameState.direction);
@@ -256,6 +271,12 @@ export function GameBoard({
         ...prev.slice(0, 1),
       ]);
       prevTopCardRef.current = gameState.topCard;
+
+      // Reproducir sonido si la jugada vino de un rival o confirmación del servidor
+      const timeSinceLocalPlay = Date.now() - lastLocalPlayTimeRef.current;
+      if (timeSinceLocalPlay > 450) {
+        soundManager.playCardMove();
+      }
     }
   }, [gameState.topCard]);
 
@@ -272,6 +293,11 @@ export function GameBoard({
 
     if (newlyAdded.length > 0) {
       setNewCardIds(new Set(newlyAdded));
+      const timeSinceLocalDraw = Date.now() - lastLocalDrawTimeRef.current;
+      // Si la carta llegó por penalización (+2, +4, timeout) y no por clic manual
+      if (timeSinceLocalDraw > 450) {
+        soundManager.playCardMove();
+      }
       const timer = setTimeout(() => {
         setNewCardIds(new Set());
       }, 1200);
@@ -300,6 +326,8 @@ export function GameBoard({
     });
 
     if (hasNewPops) {
+      // Efecto sonoro al moverse cartas hacia los rivales
+      soundManager.playCardMove();
       setOpponentPops((prev) => ({ ...prev, ...newPops }));
       setIsDeckSpring(true);
       setTimeout(() => setIsDeckSpring(false), 300);
@@ -370,6 +398,9 @@ export function GameBoard({
   const handleLocalDraw = () => {
     if (!isMyTurn || gameState.winner || flyingDrawCard) return;
 
+    lastLocalDrawTimeRef.current = Date.now();
+    soundManager.playCardMove();
+
     setIsDeckSpring(true);
     setTimeout(() => setIsDeckSpring(false), 300);
 
@@ -421,6 +452,9 @@ export function GameBoard({
       return;
     }
 
+    lastLocalPlayTimeRef.current = Date.now();
+    soundManager.playCardMove();
+
     const cardEl = e?.currentTarget || document.getElementById(`hand-card-${card.id}`);
     const discardEl = discardPileRef.current;
 
@@ -467,6 +501,9 @@ export function GameBoard({
     if (pendingWildCardId) {
       const targetId = pendingWildCardId;
       setPendingWildCardId(null);
+
+      lastLocalPlayTimeRef.current = Date.now();
+      soundManager.playCardMove();
 
       const card = gameState.myHand.find((c) => c.id === targetId);
       const cardEl = document.getElementById(`hand-card-${targetId}`);
@@ -739,18 +776,32 @@ export function GameBoard({
             </div>
           </div>
 
-          {/* Estado del WebSocket */}
-          <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-[#070c17] border border-[#182845] text-xs">
-            <span
-              className={`w-2 h-2 rounded-full ${
-                isConnected
-                  ? 'bg-[#00e5ff] shadow-[0_0_8px_#00e5ff]'
-                  : 'bg-red-500'
-              }`}
-            />
-            <span className="text-[11px] text-cyan-400 font-bold hidden md:inline">
-              EN VIVO
-            </span>
+          {/* Controles de Sonido y Estado del WebSocket */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleToggleSound}
+              className="px-2 sm:px-2.5 py-1 rounded-full bg-[#070c17] border border-[#182845] hover:border-[#243c68] text-neutral-300 hover:text-white transition-colors cursor-pointer text-xs flex items-center gap-1.5 shadow-sm"
+              title={isMuted ? 'Activar efectos de sonido' : 'Silenciar efectos de sonido'}
+            >
+              <span>{isMuted ? '🔇' : '🔊'}</span>
+              <span className="text-[10px] font-bold hidden sm:inline text-neutral-400">
+                {isMuted ? 'MUTE' : 'SONIDO'}
+              </span>
+            </button>
+
+            {/* Estado del WebSocket */}
+            <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-[#070c17] border border-[#182845] text-xs">
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  isConnected
+                    ? 'bg-[#00e5ff] shadow-[0_0_8px_#00e5ff]'
+                    : 'bg-red-500'
+                }`}
+              />
+              <span className="text-[11px] text-cyan-400 font-bold hidden md:inline">
+                EN VIVO
+              </span>
+            </div>
           </div>
         </div>
 
