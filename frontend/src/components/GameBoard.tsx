@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import Image from 'next/image';
 import { UnoCard } from './UnoCard';
 import type { Player, PlayerGameState, Card, CardColor } from '@/types/room';
@@ -11,6 +12,7 @@ interface GameBoardProps {
   error?: string | null;
   onPlayCard: (cardId: string) => void;
   onDrawCard: () => void;
+  onSayUno?: () => void;
   onRestartGame: () => void;
   onExit: () => void;
 }
@@ -22,6 +24,7 @@ export function GameBoard({
   error,
   onPlayCard,
   onDrawCard,
+  onSayUno,
   onRestartGame,
   onExit,
 }: GameBoardProps) {
@@ -100,107 +103,199 @@ export function GameBoard({
 
   const hasPlayableCard = gameState.myHand.some(canPlay);
 
+  // Estados de vulnerabilidad para la regla de cantar UNO
+  const saidUnoList = gameState.saidUnoPlayers || [];
+  const myId = currentPlayer?.id || '';
+  const myHandCount = gameState.myHand.length;
+
+  const iAmVulnerable = myHandCount === 1 && !saidUnoList.includes(myId);
+  const iSaidUno = myHandCount === 1 && saidUnoList.includes(myId);
+
+  const vulnerableOpponent = gameState.opponents.find(
+    (o) => o.cardCount === 1 && !saidUnoList.includes(o.id)
+  );
+  const opponentVulnerable = !!vulnerableOpponent;
+  const isUnoActionActive = !gameState.winner && (iAmVulnerable || opponentVulnerable);
+
+  // Reloj de turno en tiempo real
+  const [now, setNow] = useState<number>(Date.now());
+
+  useEffect(() => {
+    if (
+      !gameState.turnExpiresAt ||
+      gameState.turnTimeLimit <= 0 ||
+      gameState.winner
+    ) {
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setNow(Date.now());
+    }, 150);
+
+    return () => clearInterval(interval);
+  }, [gameState.turnExpiresAt, gameState.turnTimeLimit, gameState.winner]);
+
+  const timeLeft =
+    gameState.turnTimeLimit > 0 && gameState.turnExpiresAt
+      ? Math.max(0, Math.ceil((gameState.turnExpiresAt - now) / 1000))
+      : 0;
+
+  const timePercentage =
+    gameState.turnTimeLimit > 0 && gameState.turnExpiresAt
+      ? Math.min(100, Math.max(0, (timeLeft / gameState.turnTimeLimit) * 100))
+      : 100;
+
   return (
     <div className="w-full max-w-5xl flex flex-col justify-between min-h-[92vh] py-2 sm:py-4 px-2 sm:px-6 relative select-none">
       {/* ============================================================ */}
       {/* BARRA SUPERIOR: ESTADO GENERAL DEL JUEGO                     */}
       {/* ============================================================ */}
-      <div className="flex flex-wrap items-center justify-between gap-3 p-3 sm:p-4 rounded-2xl bg-[#0b1120]/90 border border-[#16243d] backdrop-blur-md shadow-xl">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={onExit}
-            className="p-1.5 rounded-lg bg-[#070c17] border border-[#1d3356] hover:bg-[#0c1628] text-neutral-400 hover:text-white transition-colors cursor-pointer text-xs flex items-center gap-1.5"
-            title="Salir de la partida"
-          >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
+      <div className="flex flex-col gap-2 p-3 sm:p-4 rounded-2xl bg-[#0b1120]/90 border border-[#16243d] backdrop-blur-md shadow-xl">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onExit}
+              className="p-1.5 rounded-lg bg-[#070c17] border border-[#1d3356] hover:bg-[#0c1628] text-neutral-400 hover:text-white transition-colors cursor-pointer text-xs flex items-center gap-1.5"
+              title="Salir de la partida"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M10 19l-7-7m0 0l7-7m-7 7h18"
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M10 19l-7-7m0 0l7-7m-7 7h18"
+                />
+              </svg>
+              <span className="hidden sm:inline">Salir</span>
+            </button>
+
+            <div className="flex items-center gap-2">
+              <Image
+                src="/img/logo.png"
+                alt="ACM"
+                width={100}
+                height={32}
+                className="h-6 w-auto object-contain hidden sm:block"
               />
-            </svg>
-            <span className="hidden sm:inline">Salir</span>
-          </button>
-
-          <div className="flex items-center gap-2">
-            <Image
-              src="/img/logo.png"
-              alt="ACM"
-              width={100}
-              height={32}
-              className="h-6 w-auto object-contain hidden sm:block"
-            />
-            <span className="px-2.5 py-1 rounded-lg bg-[#070c17] border border-[#182845] font-mono font-bold text-xs text-cyan-400">
-              PIN: {gameState.pin}
-            </span>
-          </div>
-        </div>
-
-        {/* Indicador central del turno actual */}
-        <div className="flex items-center gap-2 sm:gap-4">
-          <div
-            className={`px-4 py-1.5 rounded-xl border flex items-center gap-2 transition-all ${
-              isMyTurn
-                ? 'bg-emerald-950/80 border-emerald-500/80 shadow-[0_0_15px_rgba(16,185,129,0.3)] animate-pulse'
-                : 'bg-[#070c17] border-[#182845]'
-            }`}
-          >
-            <span
-              className={`w-2.5 h-2.5 rounded-full ${
-                isMyTurn ? 'bg-emerald-400' : 'bg-yellow-400 animate-pulse'
-              }`}
-            />
-            <span className="text-xs sm:text-sm font-bold tracking-wide text-white">
-              {isMyTurn ? '🔥 ¡ES TU TURNO!' : `TURNO DE: ${currentTurnName}`}
-            </span>
+              <span className="px-2.5 py-1 rounded-lg bg-[#070c17] border border-[#182845] font-mono font-bold text-xs text-cyan-400">
+                PIN: {gameState.pin}
+              </span>
+            </div>
           </div>
 
-          {/* Color actual y dirección */}
-          <div className="flex items-center gap-2 bg-[#070c17] border border-[#182845] px-3 py-1.5 rounded-xl text-xs">
-            <span
-              className={`w-3 h-3 rounded-full ${activeColorInfo.bg} shadow-sm`}
-            />
-            <span
-              className={`font-bold hidden sm:inline ${activeColorInfo.text}`}
-            >
-              {activeColorInfo.label}
-            </span>
-            <span
-              className="text-neutral-500 font-mono text-base"
-              title={`Sentido ${
-                gameState.direction === 'CLOCKWISE' ? 'horario' : 'antihorario'
+          {/* Indicador central del turno actual */}
+          <div className="flex items-center gap-2 sm:gap-4">
+            <div
+              className={`px-4 py-1.5 rounded-xl border flex items-center gap-2 transition-all ${
+                isMyTurn
+                  ? timeLeft <= 5 && gameState.turnTimeLimit > 0
+                    ? 'bg-red-950/90 border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.5)] animate-pulse'
+                    : 'bg-emerald-950/80 border-emerald-500/80 shadow-[0_0_15px_rgba(16,185,129,0.3)] animate-pulse'
+                  : 'bg-[#070c17] border-[#182845]'
               }`}
             >
-              {gameState.direction === 'CLOCKWISE' ? '↻' : '↺'}
+              <span
+                className={`w-2.5 h-2.5 rounded-full ${
+                  isMyTurn
+                    ? timeLeft <= 5 && gameState.turnTimeLimit > 0
+                      ? 'bg-red-500 animate-ping'
+                      : 'bg-emerald-400'
+                    : 'bg-yellow-400 animate-pulse'
+                }`}
+              />
+              <span className="text-xs sm:text-sm font-bold tracking-wide text-white">
+                {isMyTurn ? '🔥 ¡ES TU TURNO!' : `TURNO DE: ${currentTurnName}`}
+              </span>
+            </div>
+
+            {/* Reloj digital de turno */}
+            {gameState.turnTimeLimit > 0 && gameState.turnExpiresAt ? (
+              <div
+                className={`px-3 py-1.5 rounded-xl border flex items-center gap-1.5 font-mono text-xs sm:text-sm font-black transition-all ${
+                  timeLeft <= 5
+                    ? 'bg-red-950/90 border-red-500 text-red-400 animate-pulse shadow-[0_0_15px_rgba(239,68,68,0.5)]'
+                    : timeLeft <= 10
+                    ? 'bg-amber-950/80 border-amber-500 text-amber-300 shadow-[0_0_10px_rgba(245,158,11,0.3)]'
+                    : 'bg-[#070c17] border-[#182845] text-cyan-400'
+                }`}
+                title="Tiempo restante para este turno"
+              >
+                <span className={timeLeft <= 5 ? 'animate-bounce' : ''}>⏱️</span>
+                <span>{timeLeft}s</span>
+              </div>
+            ) : (
+              <div
+                className="px-2.5 py-1.5 rounded-xl bg-[#070c17] border border-[#182845] text-neutral-400 font-mono text-xs hidden sm:flex items-center gap-1"
+                title="Turno sin límite de tiempo"
+              >
+                <span>⏱️</span>
+                <span>∞</span>
+              </div>
+            )}
+
+            {/* Color actual y dirección */}
+            <div className="flex items-center gap-2 bg-[#070c17] border border-[#182845] px-3 py-1.5 rounded-xl text-xs">
+              <span
+                className={`w-3 h-3 rounded-full ${activeColorInfo.bg} shadow-sm`}
+              />
+              <span
+                className={`font-bold hidden sm:inline ${activeColorInfo.text}`}
+              >
+                {activeColorInfo.label}
+              </span>
+              <span
+                className="text-neutral-500 font-mono text-base"
+                title={`Sentido ${
+                  gameState.direction === 'CLOCKWISE' ? 'horario' : 'antihorario'
+                }`}
+              >
+                {gameState.direction === 'CLOCKWISE' ? '↻' : '↺'}
+              </span>
+            </div>
+          </div>
+
+          {/* Estado del WebSocket */}
+          <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-[#070c17] border border-[#182845] text-xs">
+            <span
+              className={`w-2 h-2 rounded-full ${
+                isConnected
+                  ? 'bg-[#00e5ff] shadow-[0_0_8px_#00e5ff]'
+                  : 'bg-red-500'
+              }`}
+            />
+            <span className="text-[11px] text-cyan-400 font-bold hidden md:inline">
+              EN VIVO
             </span>
           </div>
         </div>
 
-        {/* Estado del WebSocket */}
-        <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-[#070c17] border border-[#182845] text-xs">
-          <span
-            className={`w-2 h-2 rounded-full ${
-              isConnected
-                ? 'bg-[#00e5ff] shadow-[0_0_8px_#00e5ff]'
-                : 'bg-red-500'
-            }`}
-          />
-          <span className="text-[11px] text-cyan-400 font-bold hidden md:inline">
-            EN VIVO
-          </span>
-        </div>
+        {/* Barra de progreso de tiempo de turno animada */}
+        {gameState.turnTimeLimit > 0 && gameState.turnExpiresAt && !gameState.winner && (
+          <div className="w-full bg-[#070c17] rounded-full h-1.5 overflow-hidden border border-[#16253e] mt-1 relative shadow-inner">
+            <div
+              className={`h-full transition-all duration-150 rounded-full ${
+                timeLeft <= 5
+                  ? 'bg-red-500 shadow-[0_0_12px_#ef4444] animate-pulse'
+                  : timeLeft <= 10
+                  ? 'bg-amber-400 shadow-[0_0_8px_#f59e0b]'
+                  : 'bg-cyan-400 shadow-[0_0_8px_#00e5ff]'
+              }`}
+              style={{ width: `${timePercentage}%` }}
+            />
+          </div>
+        )}
       </div>
 
       {/* Banner de última acción del juego */}
       {gameState.lastActionMessage && (
         <div className="mt-2 text-center">
-          <span className="inline-block px-4 py-1 rounded-full bg-[#070c17]/90 border border-[#182845] text-xs text-neutral-300 font-medium tracking-wide animate-fade-in shadow-md">
+          <span className="inline-block px-4 py-1.5 rounded-full bg-[#070c17]/95 border border-[#1d3356] text-xs text-neutral-200 font-semibold tracking-wide animate-fade-in shadow-lg">
             {gameState.lastActionMessage}
           </span>
         </div>
@@ -222,6 +317,7 @@ export function GameBoard({
         {gameState.opponents.map((opponent) => {
           const isOpponentTurn = opponent.id === gameState.currentTurnPlayerId;
           const hasUno = opponent.cardCount === 1;
+          const opponentProtected = hasUno && saidUnoList.includes(opponent.id);
 
           return (
             <div
@@ -252,17 +348,28 @@ export function GameBoard({
                     🂠 {opponent.cardCount} cartas
                   </span>
                   {hasUno && (
-                    <span className="px-1.5 py-0.2 rounded bg-red-600 text-white font-black text-[9px] animate-pulse">
-                      ¡UNO!
-                    </span>
+                    opponentProtected ? (
+                      <span className="px-1.5 py-0.5 rounded bg-emerald-600 text-white font-black text-[9px] shadow-[0_0_8px_#10b981]">
+                        ¡UNO! ✓
+                      </span>
+                    ) : (
+                      <span className="px-1.5 py-0.5 rounded bg-red-600 text-white font-black text-[9px] animate-pulse shadow-[0_0_10px_#ef4444]">
+                        ¡SIN UNO! ⚠️
+                      </span>
+                    )
                   )}
                 </div>
               </div>
 
               {/* Indicador de turno activo en el rival */}
               {isOpponentTurn && (
-                <div className="absolute -top-2 -right-2 px-2 py-0.5 rounded-full bg-yellow-400 text-neutral-950 font-black text-[9px] uppercase tracking-wider animate-bounce">
-                  Turno
+                <div className="absolute -top-2 -right-2 px-2 py-0.5 rounded-full bg-yellow-400 text-neutral-950 font-black text-[9px] uppercase tracking-wider animate-bounce flex items-center gap-1 shadow-md">
+                  <span>Turno</span>
+                  {gameState.turnTimeLimit > 0 && gameState.turnExpiresAt && (
+                    <span className="font-mono bg-neutral-950 text-yellow-400 px-1 rounded">
+                      {timeLeft}s
+                    </span>
+                  )}
                 </div>
               )}
             </div>
@@ -271,13 +378,13 @@ export function GameBoard({
       </div>
 
       {/* ============================================================ */}
-      {/* MESA CENTRAL: MAZO DE ROBO Y PILA DE DESCARTE                */}
+      {/* MESA CENTRAL: MAZO DE ROBO, BOTÓN UNO Y PILA DE DESCARTE     */}
       {/* ============================================================ */}
       <div className="relative my-2 sm:my-6 flex items-center justify-center">
         {/* Mesa con resplandor circular */}
         <div className="absolute w-80 sm:w-96 h-48 sm:h-56 rounded-full bg-gradient-to-r from-red-600/10 via-blue-600/10 to-green-600/10 blur-3xl pointer-events-none" />
 
-        <div className="relative z-10 flex items-center justify-center gap-6 sm:gap-14 p-6 sm:p-10 rounded-3xl bg-[#091122]/70 border-2 border-[#162744] shadow-2xl backdrop-blur-md">
+        <div className="relative z-10 flex items-center justify-center gap-4 sm:gap-10 p-5 sm:p-8 rounded-3xl bg-[#091122]/70 border-2 border-[#162744] shadow-2xl backdrop-blur-md">
           {/* Mazo de Robo (Interactivo cuando es tu turno) */}
           <div className="flex flex-col items-center gap-2">
             <div
@@ -321,6 +428,64 @@ export function GameBoard({
             </span>
           </div>
 
+          {/* BOTÓN CENTRAL: ¡CANTAR UNO! / ¡DENUNCIAR UNO! */}
+          <div className="flex flex-col items-center gap-2">
+            <button
+              onClick={isUnoActionActive ? onSayUno : undefined}
+              disabled={!isUnoActionActive}
+              title={
+                iAmVulnerable
+                  ? '¡Haz clic para cantar UNO y protegerte antes de que te descubran!'
+                  : opponentVulnerable
+                  ? `¡Haz clic para denunciar a ${vulnerableOpponent?.name}! Le tocarán 2 cartas.`
+                  : 'Botón de UNO (Se activa cuando alguien tiene 1 sola carta)'
+              }
+              className={`relative flex flex-col items-center justify-center w-20 h-28 sm:w-24 sm:h-36 rounded-2xl border-2 transition-all duration-300 select-none ${
+                iAmVulnerable
+                  ? 'bg-gradient-to-b from-red-600 via-rose-500 to-red-700 border-yellow-300 shadow-[0_0_35px_rgba(239,68,68,0.9)] scale-105 animate-pulse cursor-pointer'
+                  : opponentVulnerable
+                  ? 'bg-gradient-to-b from-amber-600 via-orange-500 to-red-600 border-amber-300 shadow-[0_0_30px_rgba(245,158,11,0.9)] scale-105 animate-bounce cursor-pointer'
+                  : 'bg-[#060b17] border-[#182845] opacity-35 cursor-not-allowed'
+              }`}
+            >
+              <span className="text-2xl sm:text-3xl">
+                {iAmVulnerable ? '🔥' : opponentVulnerable ? '🚨' : '🂠'}
+              </span>
+              <span
+                className={`font-black text-xs sm:text-sm tracking-wider uppercase mt-1 ${
+                  iAmVulnerable || opponentVulnerable
+                    ? 'text-white drop-shadow'
+                    : 'text-neutral-500'
+                }`}
+              >
+                ¡UNO!
+              </span>
+              <span className="text-[8px] sm:text-[9px] font-bold text-center px-1 leading-tight text-white/90">
+                {iAmVulnerable
+                  ? '¡CÁNTALO!'
+                  : opponentVulnerable
+                  ? '¡DENUNCIA!'
+                  : 'ESPERA'}
+              </span>
+            </button>
+
+            <span
+              className={`text-[10px] font-bold uppercase tracking-wider font-mono ${
+                iAmVulnerable
+                  ? 'text-red-400 animate-pulse'
+                  : opponentVulnerable
+                  ? 'text-amber-400 animate-pulse'
+                  : 'text-neutral-500'
+              }`}
+            >
+              {iAmVulnerable
+                ? '¡PROTÉGETE!'
+                : opponentVulnerable
+                ? '+2 AL RIVAL'
+                : 'REGLA UNO'}
+            </span>
+          </div>
+
           {/* Pila de Descarte (Carta superior visible) */}
           <div className="flex flex-col items-center gap-2">
             <div className="relative">
@@ -354,21 +519,39 @@ export function GameBoard({
               Tu Mano
             </span>
             <span className="px-2 py-0.5 rounded-full text-xs font-mono font-bold bg-[#070c17] border border-[#182845] text-cyan-400">
-              {gameState.myHand.length} cartas
+              {myHandCount} cartas
             </span>
-            {gameState.myHand.length === 1 && (
-              <span className="px-2 py-0.5 rounded-full text-xs font-black bg-red-600 text-white animate-bounce">
-                ¡UNO!
-              </span>
+            {myHandCount === 1 && (
+              iSaidUno ? (
+                <span className="px-2 py-0.5 rounded-full text-xs font-black bg-emerald-600 text-white shadow-[0_0_10px_#10b981]">
+                  ¡UNO PROTEGIDO! ✓
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 rounded-full text-xs font-black bg-red-600 text-white animate-bounce shadow-[0_0_12px_#ef4444]">
+                  ¡CANTA UNO YA! ⚠️
+                </span>
+              )
             )}
           </div>
 
-          <span className="text-[11px] text-neutral-400">
+          <span
+            className={`text-[11px] font-bold ${
+              isMyTurn && timeLeft <= 5 && gameState.turnTimeLimit > 0
+                ? 'text-red-400 animate-pulse'
+                : 'text-neutral-400'
+            }`}
+          >
             {isMyTurn
-              ? hasPlayableCard
+              ? timeLeft <= 5 && gameState.turnTimeLimit > 0
+                ? `🚨 ¡Te quedan ${timeLeft}s! Juega o robarás carta automáticamente`
+                : hasPlayableCard
                 ? '👆 Haz clic en una carta iluminada para jugarla'
                 : '🃏 No tienes jugada válida. Haz clic en el mazo para robar'
-              : '⏳ Esperando el turno del rival...'}
+              : `⏳ Esperando a ${currentTurnName}... ${
+                  gameState.turnTimeLimit > 0 && gameState.turnExpiresAt
+                    ? `(${timeLeft}s)`
+                    : ''
+                }`}
           </span>
         </div>
 

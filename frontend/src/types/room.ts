@@ -59,6 +59,9 @@ export interface PlayerGameState {
   direction: GameDirection;
   drawPileCount: number;
   turnTimeLimit: number;
+  turnStartedAt?: number;
+  turnExpiresAt?: number;
+  saidUnoPlayers?: string[];
   winner?: {
     id: string;
     name: string;
@@ -102,6 +105,13 @@ export type WSClientMessage =
     }
   | {
       type: 'DRAW_CARD';
+      payload: {
+        pin: string;
+        playerId: string;
+      };
+    }
+  | {
+      type: 'SAY_UNO';
       payload: {
         pin: string;
         playerId: string;

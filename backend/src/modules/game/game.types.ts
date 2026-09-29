@@ -36,6 +36,9 @@ export interface PlayerGameState {
   direction: GameDirection;
   drawPileCount: number;
   turnTimeLimit: number;
+  turnStartedAt: number;   // Timestamp en ms de cuándo empezó el turno actual
+  turnExpiresAt: number;   // Timestamp en ms de cuándo expira el turno (0 si turnTimeLimit es 0)
+  saidUnoPlayers: string[]; // IDs de jugadores con 1 carta que ya dijeron UNO
   winner?: {
     id: string;
     name: string;

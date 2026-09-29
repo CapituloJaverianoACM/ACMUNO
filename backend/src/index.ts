@@ -49,6 +49,50 @@ function broadcastGameState(pin: string) {
   app.server?.publish(roomTopic, JSON.stringify(roomStateMessage));
 }
 
+const roomTurnTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+export function clearTurnTimer(pin: string) {
+  const normalizedPin = pin.toUpperCase();
+  const existingTimer = roomTurnTimers.get(normalizedPin);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+    roomTurnTimers.delete(normalizedPin);
+  }
+}
+
+export function scheduleTurnTimer(pin: string) {
+  clearTurnTimer(pin);
+  const normalizedPin = pin.toUpperCase();
+  const room = roomManager.getRoom(normalizedPin);
+  if (!room || !room.game || room.status !== 'PLAYING' || room.game.winner) {
+    return;
+  }
+
+  const timeLimit = room.game.turnTimeLimit;
+  if (timeLimit <= 0) return; // 0 = sin límite de tiempo
+
+  const timer = setTimeout(() => {
+    const activeRoom = roomManager.getRoom(normalizedPin);
+    if (
+      !activeRoom ||
+      !activeRoom.game ||
+      activeRoom.status !== 'PLAYING' ||
+      activeRoom.game.winner
+    ) {
+      clearTurnTimer(normalizedPin);
+      return;
+    }
+
+    const timeoutResult = activeRoom.game.handleTurnTimeout(activeRoom.players);
+    if (timeoutResult) {
+      broadcastGameState(normalizedPin);
+      scheduleTurnTimer(normalizedPin);
+    }
+  }, timeLimit * 1000);
+
+  roomTurnTimers.set(normalizedPin, timer);
+}
+
 export const app = new Elysia()
   .use(
     cors({
@@ -122,6 +166,7 @@ export const app = new Elysia()
         const { hostId } = body;
         roomManager.startGame(params.pin, hostId);
         broadcastGameState(params.pin);
+        scheduleTurnTimer(params.pin);
         const room = roomManager.getRoom(params.pin)!;
         return { success: true, room: roomManager.toPublicState(room) };
       } catch (err: unknown) {
@@ -157,6 +202,9 @@ export const app = new Elysia()
         const result = room.game.playCard(playerId, cardId, player.name);
         if (result.winner) {
           room.status = 'FINISHED';
+          clearTurnTimer(params.pin);
+        } else {
+          scheduleTurnTimer(params.pin);
         }
         broadcastGameState(params.pin);
         return { success: true, result };
@@ -192,11 +240,68 @@ export const app = new Elysia()
 
         const result = room.game.drawCard(playerId, player.name);
         broadcastGameState(params.pin);
+        scheduleTurnTimer(params.pin);
         return { success: true, result };
       } catch (err: unknown) {
         set.status = 400;
         return {
           error: err instanceof Error ? err.message : 'Error al robar carta',
+        };
+      }
+    },
+    {
+      body: t.Object({
+        playerId: t.String(),
+      }),
+    }
+  )
+  .post(
+    '/api/rooms/:pin/timeout',
+    ({ params, set }) => {
+      try {
+        const room = roomManager.getRoom(params.pin);
+        if (!room || !room.game) {
+          set.status = 400;
+          return { error: 'Partida no iniciada' };
+        }
+        const result = room.game.handleTurnTimeout(room.players);
+        if (result) {
+          broadcastGameState(params.pin);
+          scheduleTurnTimer(params.pin);
+          return { success: true, result };
+        }
+        return { success: false, message: 'No hay turno para timeout' };
+      } catch (err: unknown) {
+        set.status = 400;
+        return {
+          error: err instanceof Error ? err.message : 'Error en timeout',
+        };
+      }
+    }
+  )
+  .post(
+    '/api/rooms/:pin/uno',
+    ({ params, body, set }) => {
+      try {
+        const { playerId } = body;
+        const room = roomManager.getRoom(params.pin);
+        if (!room || !room.game) {
+          set.status = 400;
+          return { error: 'Partida no iniciada' };
+        }
+        const player = room.players.get(playerId);
+        if (!player) {
+          set.status = 400;
+          return { error: 'Jugador no encontrado' };
+        }
+
+        const result = room.game.sayUno(playerId, player.name, room.players);
+        broadcastGameState(params.pin);
+        return { success: true, result };
+      } catch (err: unknown) {
+        set.status = 400;
+        return {
+          error: err instanceof Error ? err.message : 'Error al cantar UNO',
         };
       }
     },
@@ -420,6 +525,7 @@ export const app = new Elysia()
           try {
             roomManager.startGame(pin, hostId);
             broadcastGameState(pin);
+            scheduleTurnTimer(pin);
           } catch (err: unknown) {
             ws.send(
               JSON.stringify({
@@ -446,6 +552,9 @@ export const app = new Elysia()
             const result = room.game.playCard(playerId, cardId, player.name);
             if (result.winner) {
               room.status = 'FINISHED';
+              clearTurnTimer(pin);
+            } else {
+              scheduleTurnTimer(pin);
             }
             broadcastGameState(pin);
           } catch (err: unknown) {
@@ -471,6 +580,7 @@ export const app = new Elysia()
           try {
             room.game.drawCard(playerId, player.name);
             broadcastGameState(pin);
+            scheduleTurnTimer(pin);
           } catch (err: unknown) {
             ws.send(
               JSON.stringify({
@@ -484,10 +594,34 @@ export const app = new Elysia()
           }
         }
 
+        if (data.type === 'SAY_UNO') {
+          const { pin, playerId } = data.payload;
+          const room = roomManager.getRoom(pin);
+          if (!room || !room.game) return;
+          const player = room.players.get(playerId);
+          if (!player) return;
+
+          try {
+            room.game.sayUno(playerId, player.name, room.players);
+            broadcastGameState(pin);
+          } catch (err: unknown) {
+            ws.send(
+              JSON.stringify({
+                type: 'ERROR',
+                payload: {
+                  message:
+                    err instanceof Error ? err.message : 'Error al cantar UNO',
+                },
+              } satisfies WSServerMessage)
+            );
+          }
+        }
+
         if (data.type === 'RESTART_GAME') {
           const { pin, hostId } = data.payload;
           const room = roomManager.getRoom(pin);
           if (room && room.hostId === hostId) {
+            clearTurnTimer(pin);
             room.status = 'LOBBY';
             room.game = undefined;
             const roomTopic = `room:${pin.toUpperCase()}`;

@@ -72,6 +72,13 @@ export type WSClientMessage =
       };
     }
   | {
+      type: 'SAY_UNO';
+      payload: {
+        pin: string;
+        playerId: string;
+      };
+    }
+  | {
       type: 'KICK_PLAYER';
       payload: {
         pin: string;

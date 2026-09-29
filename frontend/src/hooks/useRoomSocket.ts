@@ -72,6 +72,17 @@ export function useRoomSocket(
     });
   }, [pin, playerId, sendMessage]);
 
+  const sayUnoAction = useCallback(() => {
+    if (!pin || !playerId) return;
+    sendMessage({
+      type: 'SAY_UNO',
+      payload: {
+        pin,
+        playerId,
+      },
+    });
+  }, [pin, playerId, sendMessage]);
+
   const restartGameAction = useCallback(() => {
     if (!pin || !playerId) return;
     sendMessage({
@@ -190,6 +201,7 @@ export function useRoomSocket(
     startGame: startGameAction,
     playCard: playCardAction,
     drawCard: drawCardAction,
+    sayUno: sayUnoAction,
     restartGame: restartGameAction,
     kickPlayer: kickPlayerAction,
     updateSettings: updateSettingsAction,

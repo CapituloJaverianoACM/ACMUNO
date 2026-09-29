@@ -89,6 +89,7 @@ export default function RoomPage({ params }: RoomPageProps) {
     startGame,
     playCard,
     drawCard,
+    sayUno,
     restartGame,
     kickPlayer,
     updateSettings,
@@ -129,6 +130,7 @@ export default function RoomPage({ params }: RoomPageProps) {
           error={error}
           onPlayCard={playCard}
           onDrawCard={drawCard}
+          onSayUno={sayUno}
           onRestartGame={restartGame}
           onExit={() => router.push('/')}
         />

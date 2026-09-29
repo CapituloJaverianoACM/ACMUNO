@@ -17,8 +17,11 @@ export class UnoGame {
   public currentTurnIndex: number = 0;
   public direction: GameDirection = 'CLOCKWISE';
   public turnTimeLimit: number = 30;
+  public turnStartedAt: number = Date.now();
+  public turnExpiresAt: number = 0;
   public winner?: { id: string; name: string };
   public lastActionMessage?: string;
+  public saidUno: Set<string> = new Set(); // Jugadores con 1 carta protegidos por cantar UNO
 
   constructor(pin: string, turnTimeLimit = 30) {
     this.pin = pin;
@@ -113,6 +116,7 @@ export class UnoGame {
 
     this.playerOrder = players.map((p) => p.id);
     this.hands.clear();
+    this.saidUno.clear();
     this.direction = 'CLOCKWISE';
     this.currentTurnIndex = 0;
     this.winner = undefined;
@@ -139,6 +143,9 @@ export class UnoGame {
     this.discardPile = [firstCard];
     this.drawPile = deck;
     this.currentColor = firstCard.color;
+    this.turnStartedAt = Date.now();
+    this.turnExpiresAt =
+      this.turnTimeLimit > 0 ? this.turnStartedAt + this.turnTimeLimit * 1000 : 0;
     this.lastActionMessage = `¡Partida iniciada! Carta de salida: ${firstCard.value} ${this.getColorName(firstCard.color)}.`;
   }
 
@@ -175,12 +182,15 @@ export class UnoGame {
   }
 
   /**
-   * Avanza el turno un número de posiciones según la dirección actual.
+   * Avanza el turno un número de posiciones según la dirección actual y reinicia el reloj de turno.
    */
   private advanceTurn(steps = 1): void {
     const total = this.playerOrder.length;
     const dir = this.direction === 'CLOCKWISE' ? 1 : -1;
     this.currentTurnIndex = (((this.currentTurnIndex + (dir * steps)) % total) + total) % total;
+    this.turnStartedAt = Date.now();
+    this.turnExpiresAt =
+      this.turnTimeLimit > 0 ? this.turnStartedAt + this.turnTimeLimit * 1000 : 0;
   }
 
   /**
@@ -251,6 +261,13 @@ export class UnoGame {
       };
     }
 
+    // Si queda en 1 carta, debe decir UNO (aún no está protegido)
+    if (hand.length === 1) {
+      this.saidUno.delete(playerId);
+    } else {
+      this.saidUno.delete(playerId);
+    }
+
     // Efectos de cartas especiales
     let effectMsg = '';
     const colorName = this.getColorName(card.color);
@@ -281,12 +298,13 @@ export class UnoGame {
       const drawnCards = this.drawPile.splice(0, Math.min(2, this.drawPile.length));
       victimHand.push(...drawnCards);
       this.hands.set(victimId, victimHand);
+      this.saidUno.delete(victimId);
       this.advanceTurn(2);
       effectMsg = `💥 ${playerName} jugó un +2 ${colorName}. ¡El siguiente jugador roba 2 cartas y pierde su turno!`;
     }
 
     if (hand.length === 1) {
-      effectMsg += ` ⚠️ ¡${playerName} gritó UNO!`;
+      effectMsg += ` ⚠️ ¡A ${playerName} le queda 1 carta! (¡Canten UNO!)`;
     }
 
     this.lastActionMessage = effectMsg;
@@ -325,12 +343,102 @@ export class UnoGame {
 
     const drawnCard = this.drawPile.shift()!;
     hand.push(drawnCard);
+    this.saidUno.delete(playerId);
 
     this.advanceTurn(1);
     this.lastActionMessage = `🃏 ${playerName} robó 1 carta del mazo y pasó turno.`;
 
     return {
       success: true,
+      drawnCard,
+      effectMessage: this.lastActionMessage,
+    };
+  }
+
+  /**
+   * Maneja la acción de cantar UNO:
+   * - Si quien lo canta tiene 1 carta y no ha cantado UNO, se protege a sí mismo.
+   * - Si quien lo canta denuncia a un rival que tiene 1 carta y no lo ha dicho, el rival roba 2 cartas de penalización.
+   */
+  public sayUno(
+    callerId: string,
+    callerName: string,
+    allPlayers: Map<string, Player>
+  ): { success: boolean; effectMessage: string; penalizedPlayerId?: string } {
+    if (this.winner) {
+      throw new Error('La partida ya ha finalizado.');
+    }
+
+    const callerHand = this.hands.get(callerId) || [];
+
+    // Caso 1: El propio jugador tiene 1 carta y aún no ha cantado UNO -> Se protege a sí mismo
+    if (callerHand.length === 1 && !this.saidUno.has(callerId)) {
+      this.saidUno.add(callerId);
+      const msg = `🎉 ¡${callerName} cantó ¡UNO! a tiempo! Queda protegido.`;
+      this.lastActionMessage = msg;
+      return { success: true, effectMessage: msg };
+    }
+
+    // Caso 2: El jugador denuncia a OTRA persona que tiene 1 carta y NO ha cantado UNO
+    const vulnerableId = this.playerOrder.find((id) => {
+      const h = this.hands.get(id);
+      return h && h.length === 1 && !this.saidUno.has(id) && id !== callerId;
+    });
+
+    if (vulnerableId) {
+      const victim = allPlayers.get(vulnerableId);
+      const victimName = victim?.name || 'El jugador';
+      const victimHand = this.hands.get(vulnerableId) || [];
+
+      this.replenishDrawPileIfNeeded();
+      const penaltyCards = this.drawPile.splice(0, Math.min(2, this.drawPile.length));
+      victimHand.push(...penaltyCards);
+      this.hands.set(vulnerableId, victimHand);
+      this.saidUno.delete(vulnerableId);
+
+      const msg = `🚨 ¡${callerName} descubrió a ${victimName} sin decir UNO! ${victimName} recibe 2 cartas de penalización.`;
+      this.lastActionMessage = msg;
+      return { success: true, effectMessage: msg, penalizedPlayerId: vulnerableId };
+    }
+
+    if (callerHand.length === 1 && this.saidUno.has(callerId)) {
+      throw new Error('Ya habías cantado UNO para tu última carta.');
+    }
+
+    throw new Error('No hay ningún jugador con 1 carta vulnerable.');
+  }
+
+  /**
+   * Maneja el timeout de un turno cuando se agota el tiempo límite.
+   * El jugador cuyo turno expiró roba 1 carta del mazo y pasa su turno automáticamente.
+   */
+  public handleTurnTimeout(allPlayers: Map<string, Player>): {
+    timedOutPlayerId: string;
+    drawnCard?: Card;
+    effectMessage: string;
+  } | null {
+    if (this.winner || this.turnTimeLimit <= 0) return null;
+
+    const currentTurnId = this.getCurrentTurnPlayerId();
+    const player = allPlayers.get(currentTurnId);
+    const playerName = player?.name || 'El jugador';
+
+    this.replenishDrawPileIfNeeded();
+    const hand = this.hands.get(currentTurnId);
+    if (!hand) return null;
+
+    let drawnCard: Card | undefined;
+    if (this.drawPile.length > 0) {
+      drawnCard = this.drawPile.shift()!;
+      hand.push(drawnCard);
+    }
+    this.saidUno.delete(currentTurnId);
+
+    this.advanceTurn(1);
+    this.lastActionMessage = `⏰ ¡Se agotó el tiempo de ${playerName}! Robó 1 carta del mazo y pasó turno.`;
+
+    return {
+      timedOutPlayerId: currentTurnId,
       drawnCard,
       effectMessage: this.lastActionMessage,
     };
@@ -384,6 +492,9 @@ export class UnoGame {
       direction: this.direction,
       drawPileCount: this.drawPile.length,
       turnTimeLimit: this.turnTimeLimit,
+      turnStartedAt: this.turnStartedAt,
+      turnExpiresAt: this.turnExpiresAt,
+      saidUnoPlayers: Array.from(this.saidUno),
       winner: this.winner,
       lastActionMessage: this.lastActionMessage,
     };
