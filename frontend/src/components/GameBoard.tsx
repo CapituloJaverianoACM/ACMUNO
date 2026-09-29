@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import { UnoCard } from './UnoCard';
-import type { Player, PlayerGameState, Card, CardColor } from '@/types/room';
+import type { Player, PlayerGameState, Card, CardColor, OpponentState } from '@/types/room';
 
 // Helper determinista para rotación de cartas sobre la mesa (-5° a +5°)
 function getCardRotation(cardId: string): number {
@@ -13,6 +13,32 @@ function getCardRotation(cardId: string): number {
     hash |= 0;
   }
   return (Math.abs(hash) % 11) - 5;
+}
+
+// Distribuye los rivales de manera equilibrada alrededor de la mesa (Flanco Izquierdo, Frente/Arriba, Flanco Derecho)
+function distributeOpponentsAroundTable<T>(opponents: T[]): {
+  left: T[];
+  top: T[];
+  right: T[];
+} {
+  const n = opponents.length;
+  if (n === 0) return { left: [], top: [], right: [] };
+  if (n === 1) return { left: [], top: [opponents[0]], right: [] };
+  if (n === 2) return { left: [opponents[0]], top: [], right: [opponents[1]] };
+  if (n === 3) return { left: [opponents[0]], top: [opponents[1]], right: [opponents[2]] };
+  if (n === 4) return { left: [opponents[0]], top: [opponents[1], opponents[2]], right: [opponents[3]] };
+  if (n === 5) return { left: [opponents[0], opponents[1]], top: [opponents[2]], right: [opponents[3], opponents[4]] };
+  if (n === 6) return { left: [opponents[0], opponents[1]], top: [opponents[2], opponents[3]], right: [opponents[4], opponents[5]] };
+  if (n === 7) return { left: [opponents[0], opponents[1]], top: [opponents[2], opponents[3], opponents[4]], right: [opponents[5], opponents[6]] };
+  if (n === 8) return { left: [opponents[0], opponents[1], opponents[2]], top: [opponents[3], opponents[4]], right: [opponents[5], opponents[6], opponents[7]] };
+  if (n === 9) return { left: [opponents[0], opponents[1], opponents[2]], top: [opponents[3], opponents[4], opponents[5]], right: [opponents[6], opponents[7], opponents[8]] };
+
+  const sideCount = Math.floor(n / 3);
+  return {
+    left: opponents.slice(0, sideCount),
+    top: opponents.slice(sideCount, n - sideCount),
+    right: opponents.slice(n - sideCount),
+  };
 }
 
 interface GameBoardProps {
@@ -486,6 +512,115 @@ export function GameBoard({
     }
   };
 
+  const tableSeats = distributeOpponentsAroundTable(gameState.opponents);
+
+  const renderOpponentSeat = (
+    opponent: OpponentState,
+    position: 'top' | 'left' | 'right'
+  ) => {
+    const isOpponentTurn = opponent.id === gameState.currentTurnPlayerId;
+    const hasUno = opponent.cardCount === 1;
+    const opponentProtected = hasUno && saidUnoList.includes(opponent.id);
+    const isFlank = position === 'left' || position === 'right';
+
+    return (
+      <div
+        id={`opponent-badge-${opponent.id}`}
+        key={opponent.id}
+        className={`relative flex ${
+          isFlank ? 'flex-col sm:flex-row' : 'flex-row'
+        } items-center gap-2 sm:gap-2.5 p-2 sm:p-2.5 rounded-2xl transition-all duration-300 ${
+          isOpponentTurn
+            ? 'bg-[#0c1830] border-2 border-yellow-400 shadow-[0_0_24px_rgba(250,204,21,0.35)] scale-105 sm:scale-110 z-20'
+            : 'bg-[#070c17]/90 border border-[#182845] hover:border-[#223960] shadow-md'
+        } backdrop-blur-md`}
+      >
+        {/* Indicador flotante cuando el rival roba cartas */}
+        {opponentPops[opponent.id] && (
+          <div className="absolute -top-7 left-1/2 -translate-x-1/2 z-30 pointer-events-none animate-badge-pop whitespace-nowrap">
+            <span className="px-2.5 py-0.5 rounded-full bg-red-600 border border-red-300 text-white font-black text-xs shadow-[0_0_12px_#ef4444]">
+              {opponentPops[opponent.id]}
+            </span>
+          </div>
+        )}
+
+        {/* Avatar con inicial y corona */}
+        <div className="relative">
+          <div
+            className={`w-9 h-9 sm:w-11 sm:h-11 rounded-xl bg-gradient-to-tr from-[#0051b3] to-[#00b4d8] flex items-center justify-center font-black text-sm sm:text-base text-neutral-950 shadow-md ${
+              isOpponentTurn ? 'ring-2 ring-yellow-400 ring-offset-2 ring-offset-[#070c17]' : ''
+            }`}
+          >
+            {opponent.name.charAt(0).toUpperCase()}
+          </div>
+          {opponent.isHost && (
+            <span
+              className="absolute -top-2 -left-1 text-xs sm:text-sm drop-shadow"
+              title="Anfitrión de la sala"
+            >
+              👑
+            </span>
+          )}
+          {/* Indicador de conexión */}
+          <span
+            className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-[#070c17] ${
+              opponent.isConnected ? 'bg-emerald-400' : 'bg-red-500'
+            }`}
+            title={opponent.isConnected ? 'Conectado' : 'Desconectado'}
+          />
+        </div>
+
+        {/* Información del Rival */}
+        <div
+          className={`flex flex-col ${
+            isFlank
+              ? 'items-center sm:items-start text-center sm:text-left'
+              : 'items-start text-left'
+          }`}
+        >
+          <span
+            className="text-xs sm:text-sm font-bold text-white max-w-[70px] sm:max-w-[110px] truncate"
+            title={opponent.name}
+          >
+            {opponent.name}
+          </span>
+
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <span className="text-[10px] sm:text-xs font-mono font-bold text-cyan-400 flex items-center gap-0.5">
+              <span>🂠</span>
+              <span>{opponent.cardCount}</span>
+              <span className="hidden sm:inline">cartas</span>
+            </span>
+
+            {hasUno && (
+              opponentProtected ? (
+                <span className="px-1.5 py-0.5 rounded bg-emerald-600 text-white font-black text-[9px] shadow-[0_0_8px_#10b981] whitespace-nowrap">
+                  ¡UNO! ✓
+                </span>
+              ) : (
+                <span className="px-1.5 py-0.5 rounded bg-red-600 text-white font-black text-[9px] animate-pulse shadow-[0_0_10px_#ef4444] whitespace-nowrap">
+                  ¡SIN UNO! ⚠️
+                </span>
+              )
+            )}
+          </div>
+        </div>
+
+        {/* Indicador de turno activo en el rival */}
+        {isOpponentTurn && (
+          <div className="absolute -top-2.5 -right-2 px-2 py-0.5 rounded-full bg-yellow-400 text-neutral-950 font-black text-[9px] uppercase tracking-wider animate-bounce flex items-center gap-1 shadow-md z-10">
+            <span>Turno</span>
+            {gameState.turnTimeLimit > 0 && gameState.turnExpiresAt && (
+              <span className="font-mono bg-neutral-950 text-yellow-400 px-1 rounded">
+                {timeLeft}s
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="w-full max-w-5xl flex flex-col justify-between min-h-[92vh] py-2 sm:py-4 px-2 sm:px-6 relative select-none">
       {/* ============================================================ */}
@@ -655,242 +790,211 @@ export function GameBoard({
       )}
 
       {/* ============================================================ */}
-      {/* SECCIÓN SUPERIOR: JUGADORES RIVALES                          */}
+      {/* MESA DE JUEGO OVALADA: RIVALES ALREDEDOR Y MESA CENTRAL      */}
       {/* ============================================================ */}
-      <div className="my-3 flex flex-wrap items-center justify-center gap-3 sm:gap-6">
-        {gameState.opponents.map((opponent) => {
-          const isOpponentTurn = opponent.id === gameState.currentTurnPlayerId;
-          const hasUno = opponent.cardCount === 1;
-          const opponentProtected = hasUno && saidUnoList.includes(opponent.id);
+      <div className="relative my-auto w-full py-3 sm:py-6 flex flex-col items-center justify-center">
+        {/* Mesa de fieltro ovalada con reborde iluminado */}
+        <div className="absolute inset-x-0 sm:inset-x-4 inset-y-0 rounded-[36px] sm:rounded-[56px] bg-gradient-to-b from-[#081326]/65 via-[#0a1832]/50 to-[#070e1c]/75 border-2 border-[#16294a]/60 shadow-[inset_0_0_50px_rgba(0,0,0,0.6)] pointer-events-none -z-10" />
 
-          return (
-            <div
-              id={`opponent-badge-${opponent.id}`}
-              key={opponent.id}
-              className={`relative flex items-center gap-3 p-2.5 sm:p-3 rounded-2xl transition-all duration-300 ${
-                isOpponentTurn
-                  ? 'bg-[#0c1830] border-2 border-yellow-400/80 shadow-[0_0_20px_rgba(250,204,21,0.25)] scale-105'
-                  : 'bg-[#070c17]/80 border border-[#182845]'
-              }`}
-            >
-              {/* Indicador flotante cuando el rival roba cartas */}
-              {opponentPops[opponent.id] && (
-                <div className="absolute -top-7 left-1/2 -translate-x-1/2 z-30 pointer-events-none animate-badge-pop whitespace-nowrap">
-                  <span className="px-2.5 py-0.5 rounded-full bg-red-600 border border-red-300 text-white font-black text-xs shadow-[0_0_12px_#ef4444]">
-                    {opponentPops[opponent.id]}
-                  </span>
-                </div>
-              )}
-              {/* Avatar con inicial */}
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-[#0051b3] to-[#00b4d8] flex items-center justify-center font-black text-sm text-neutral-950 shadow-md">
-                {opponent.name.charAt(0).toUpperCase()}
-              </div>
+        {/* Resplandor ambiental de la mesa */}
+        <div className="absolute w-72 sm:w-[500px] h-40 sm:h-64 rounded-full bg-gradient-to-r from-red-600/10 via-cyan-600/15 to-emerald-600/10 blur-3xl pointer-events-none -z-10" />
 
-              <div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs sm:text-sm font-bold text-white max-w-[100px] truncate">
-                    {opponent.name}
-                  </span>
-                  {opponent.isHost && (
-                    <span className="text-[10px] text-yellow-400">👑</span>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-1.5 mt-0.5">
-                  <span className="text-xs font-mono font-bold text-cyan-400">
-                    🂠 {opponent.cardCount} cartas
-                  </span>
-                  {hasUno && (
-                    opponentProtected ? (
-                      <span className="px-1.5 py-0.5 rounded bg-emerald-600 text-white font-black text-[9px] shadow-[0_0_8px_#10b981]">
-                        ¡UNO! ✓
-                      </span>
-                    ) : (
-                      <span className="px-1.5 py-0.5 rounded bg-red-600 text-white font-black text-[9px] animate-pulse shadow-[0_0_10px_#ef4444]">
-                        ¡SIN UNO! ⚠️
-                      </span>
-                    )
-                  )}
-                </div>
-              </div>
-
-              {/* Indicador de turno activo en el rival */}
-              {isOpponentTurn && (
-                <div className="absolute -top-2 -right-2 px-2 py-0.5 rounded-full bg-yellow-400 text-neutral-950 font-black text-[9px] uppercase tracking-wider animate-bounce flex items-center gap-1 shadow-md">
-                  <span>Turno</span>
-                  {gameState.turnTimeLimit > 0 && gameState.turnExpiresAt && (
-                    <span className="font-mono bg-neutral-950 text-yellow-400 px-1 rounded">
-                      {timeLeft}s
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* ============================================================ */}
-      {/* MESA CENTRAL: MAZO DE ROBO, BOTÓN UNO Y PILA DE DESCARTE     */}
-      {/* ============================================================ */}
-      <div className="relative my-2 sm:my-6 flex items-center justify-center">
-        {/* Mesa con resplandor circular */}
-        <div className="absolute w-80 sm:w-96 h-48 sm:h-56 rounded-full bg-gradient-to-r from-red-600/10 via-blue-600/10 to-green-600/10 blur-3xl pointer-events-none" />
-
-        <div className="relative z-10 flex items-center justify-center gap-4 sm:gap-10 p-5 sm:p-8 rounded-3xl bg-[#091122]/70 border-2 border-[#162744] shadow-2xl backdrop-blur-md">
-          {/* Mazo de Robo (Interactivo cuando es tu turno con resorte) */}
-          <div className="flex flex-col items-center gap-2">
-            <div
-              ref={deckPileRef}
-              onClick={isMyTurn && !gameState.winner ? handleLocalDraw : undefined}
-              className={`relative group ${
-                isDeckSpring ? 'animate-deck-spring' : ''
-              } ${
-                isMyTurn && !gameState.winner
-                  ? 'cursor-pointer hover:scale-105 active:scale-95'
-                  : 'cursor-default opacity-85'
-              }`}
-              title={
-                isMyTurn
-                  ? hasPlayableCard
-                    ? 'Haz clic para robar 1 carta (o juega una carta válida de tu mano)'
-                    : '¡No tienes carta válida! Haz clic para robar del mazo'
-                  : 'Espera tu turno para robar'
-              }
-            >
-              {/* Efecto de pila 3D apilada */}
-              <div className="absolute top-2 left-2 w-20 h-28 sm:w-24 sm:h-36 rounded-xl bg-[#060a14] border border-[#16253e] -rotate-3" />
-              <div className="absolute top-1 left-1 w-20 h-28 sm:w-24 sm:h-36 rounded-xl bg-[#070c17] border border-[#182845] rotate-2" />
-
-              <UnoCard
-                isFaceDown
-                size="md"
-                className={`relative transition-all duration-200 ${
-                  isMyTurn && !hasPlayableCard
-                    ? 'ring-2 ring-yellow-400 ring-offset-2 ring-offset-[#091122] animate-pulse'
-                    : ''
-                }`}
-              />
-
-              {isMyTurn && !gameState.winner && (
-                <div className="absolute -bottom-3 inset-x-0 mx-auto w-max px-2 py-0.5 rounded-full bg-[#0084ff] text-white text-[9px] font-black uppercase tracking-wider shadow-md">
-                  Robar
-                </div>
-              )}
-            </div>
-
-            <span className="text-[11px] font-bold text-neutral-400 font-mono mt-2">
-              Mazo ({gameState.drawPileCount})
-            </span>
+        {/* 1. SECTOR SUPERIOR: Jugadores al frente de la mesa */}
+        {tableSeats.top.length > 0 && (
+          <div className="w-full flex items-center justify-center gap-2 sm:gap-5 mb-3 sm:mb-5 px-2 z-10">
+            {tableSeats.top.map((opponent) => renderOpponentSeat(opponent, 'top'))}
           </div>
+        )}
 
-          {/* BOTÓN CENTRAL: ¡CANTAR UNO! / ¡DENUNCIAR UNO! */}
-          <div className="flex flex-col items-center gap-2">
-            <button
-              onClick={isUnoActionActive ? onSayUno : undefined}
-              disabled={!isUnoActionActive}
-              title={
-                iAmVulnerable
-                  ? '¡Haz clic para cantar UNO y protegerte antes de que te descubran!'
-                  : opponentVulnerable
-                  ? `¡Haz clic para denunciar a ${vulnerableOpponent?.name}! Le tocarán 2 cartas.`
-                  : 'Botón de UNO (Se activa cuando alguien tiene 1 sola carta)'
-              }
-              className={`relative flex flex-col items-center justify-center w-20 h-28 sm:w-24 sm:h-36 rounded-2xl border-2 transition-all duration-300 select-none ${
-                iAmVulnerable
-                  ? 'bg-gradient-to-b from-red-600 via-rose-500 to-red-700 border-yellow-300 shadow-[0_0_35px_rgba(239,68,68,0.9)] scale-105 animate-pulse cursor-pointer'
-                  : opponentVulnerable
-                  ? 'bg-gradient-to-b from-amber-600 via-orange-500 to-red-600 border-amber-300 shadow-[0_0_30px_rgba(245,158,11,0.9)] scale-105 animate-bounce cursor-pointer'
-                  : 'bg-[#060b17] border-[#182845] opacity-35 cursor-not-allowed'
-              }`}
+        {/* 2. SECTOR CENTRAL: Flanco Izquierdo, Mesa de Cartas y Flanco Derecho */}
+        <div className="w-full flex items-center justify-between sm:justify-center gap-2 sm:gap-6 lg:gap-10 px-1 sm:px-4 z-10">
+          {/* Flanco Izquierdo */}
+          {tableSeats.left.length > 0 && (
+            <div className="flex flex-col items-center justify-center gap-2 sm:gap-4 min-w-[55px] sm:min-w-[130px] md:min-w-[160px]">
+              {tableSeats.left.map((opponent) => renderOpponentSeat(opponent, 'left'))}
+            </div>
+          )}
+
+          {/* MESA CENTRAL: MAZO DE ROBO, BOTÓN UNO Y PILA DE DESCARTE */}
+          <div className="relative z-10 flex items-center justify-center gap-3 sm:gap-8 md:gap-10 p-3.5 sm:p-7 rounded-3xl bg-[#091122]/85 border-2 border-[#162744] shadow-2xl backdrop-blur-md">
+            {/* Indicador de sentido de juego sobre la mesa */}
+            <div
+              className="absolute -top-3 inset-x-0 mx-auto w-max px-3 py-0.5 rounded-full bg-[#070c17] border border-[#1b2b48] text-[9px] sm:text-[10px] font-bold font-mono text-neutral-400 flex items-center gap-1.5 shadow-md"
+              title={`Sentido de la ronda: ${gameState.direction === 'CLOCKWISE' ? 'Horario' : 'Antihorario'}`}
             >
-              <span className="text-2xl sm:text-3xl">
-                {iAmVulnerable ? '🔥' : opponentVulnerable ? '🚨' : '🂠'}
-              </span>
               <span
-                className={`font-black text-xs sm:text-sm tracking-wider uppercase mt-1 ${
-                  iAmVulnerable || opponentVulnerable
-                    ? 'text-white drop-shadow'
+                className={`inline-block transition-transform duration-300 ${
+                  isDirectionSpinning ? 'animate-reverse-spin text-cyan-400' : 'text-cyan-400'
+                }`}
+              >
+                {gameState.direction === 'CLOCKWISE' ? '↻' : '↺'}
+              </span>
+              <span className="hidden sm:inline">
+                {gameState.direction === 'CLOCKWISE' ? 'SENTIDO HORARIO' : 'SENTIDO ANTIHORARIO'}
+              </span>
+            </div>
+
+            {/* Mazo de Robo (Interactivo cuando es tu turno con resorte) */}
+            <div className="flex flex-col items-center gap-2">
+              <div
+                ref={deckPileRef}
+                onClick={isMyTurn && !gameState.winner ? handleLocalDraw : undefined}
+                className={`relative group ${
+                  isDeckSpring ? 'animate-deck-spring' : ''
+                } ${
+                  isMyTurn && !gameState.winner
+                    ? 'cursor-pointer hover:scale-105 active:scale-95'
+                    : 'cursor-default opacity-85'
+                }`}
+                title={
+                  isMyTurn
+                    ? hasPlayableCard
+                      ? 'Haz clic para robar 1 carta (o juega una carta válida de tu mano)'
+                      : '¡No tienes carta válida! Haz clic para robar del mazo'
+                    : 'Espera tu turno para robar'
+                }
+              >
+                {/* Efecto de pila 3D apilada */}
+                <div className="absolute top-2 left-2 w-20 h-28 sm:w-24 sm:h-36 rounded-xl bg-[#060a14] border border-[#16253e] -rotate-3" />
+                <div className="absolute top-1 left-1 w-20 h-28 sm:w-24 sm:h-36 rounded-xl bg-[#070c17] border border-[#182845] rotate-2" />
+
+                <UnoCard
+                  isFaceDown
+                  size="md"
+                  className={`relative transition-all duration-200 ${
+                    isMyTurn && !hasPlayableCard
+                      ? 'ring-2 ring-yellow-400 ring-offset-2 ring-offset-[#091122] animate-pulse'
+                      : ''
+                  }`}
+                />
+
+                {isMyTurn && !gameState.winner && (
+                  <div className="absolute -bottom-3 inset-x-0 mx-auto w-max px-2 py-0.5 rounded-full bg-[#0084ff] text-white text-[9px] font-black uppercase tracking-wider shadow-md">
+                    Robar
+                  </div>
+                )}
+              </div>
+
+              <span className="text-[11px] font-bold text-neutral-400 font-mono mt-2">
+                Mazo ({gameState.drawPileCount})
+              </span>
+            </div>
+
+            {/* BOTÓN CENTRAL: ¡CANTAR UNO! / ¡DENUNCIAR UNO! */}
+            <div className="flex flex-col items-center gap-2">
+              <button
+                onClick={isUnoActionActive ? onSayUno : undefined}
+                disabled={!isUnoActionActive}
+                title={
+                  iAmVulnerable
+                    ? '¡Haz clic para cantar UNO y protegerte antes de que te descubran!'
+                    : opponentVulnerable
+                    ? `¡Haz clic para denunciar a ${vulnerableOpponent?.name}! Le tocarán 2 cartas.`
+                    : 'Botón de UNO (Se activa cuando alguien tiene 1 sola carta)'
+                }
+                className={`relative flex flex-col items-center justify-center w-20 h-28 sm:w-24 sm:h-36 rounded-2xl border-2 transition-all duration-300 select-none ${
+                  iAmVulnerable
+                    ? 'bg-gradient-to-b from-red-600 via-rose-500 to-red-700 border-yellow-300 shadow-[0_0_35px_rgba(239,68,68,0.9)] scale-105 animate-pulse cursor-pointer'
+                    : opponentVulnerable
+                    ? 'bg-gradient-to-b from-amber-600 via-orange-500 to-red-600 border-amber-300 shadow-[0_0_30px_rgba(245,158,11,0.9)] scale-105 animate-bounce cursor-pointer'
+                    : 'bg-[#060b17] border-[#182845] opacity-35 cursor-not-allowed'
+                }`}
+              >
+                <span className="text-2xl sm:text-3xl">
+                  {iAmVulnerable ? '🔥' : opponentVulnerable ? '🚨' : '🂠'}
+                </span>
+                <span
+                  className={`font-black text-xs sm:text-sm tracking-wider uppercase mt-1 ${
+                    iAmVulnerable || opponentVulnerable
+                      ? 'text-white drop-shadow'
+                      : 'text-neutral-500'
+                  }`}
+                >
+                  ¡UNO!
+                </span>
+                <span className="text-[8px] sm:text-[9px] font-bold text-center px-1 leading-tight text-white/90">
+                  {iAmVulnerable
+                    ? '¡CÁNTALO!'
+                    : opponentVulnerable
+                    ? '¡DENUNCIA!'
+                    : 'ESPERA'}
+                </span>
+              </button>
+
+              <span
+                className={`text-[10px] font-bold uppercase tracking-wider font-mono ${
+                  iAmVulnerable
+                    ? 'text-red-400 animate-pulse'
+                    : opponentVulnerable
+                    ? 'text-amber-400 animate-pulse'
                     : 'text-neutral-500'
                 }`}
               >
-                ¡UNO!
-              </span>
-              <span className="text-[8px] sm:text-[9px] font-bold text-center px-1 leading-tight text-white/90">
                 {iAmVulnerable
-                  ? '¡CÁNTALO!'
+                  ? '¡PROTÉGETE!'
                   : opponentVulnerable
-                  ? '¡DENUNCIA!'
-                  : 'ESPERA'}
+                  ? '+2 AL RIVAL'
+                  : 'REGLA UNO'}
               </span>
-            </button>
-
-            <span
-              className={`text-[10px] font-bold uppercase tracking-wider font-mono ${
-                iAmVulnerable
-                  ? 'text-red-400 animate-pulse'
-                  : opponentVulnerable
-                  ? 'text-amber-400 animate-pulse'
-                  : 'text-neutral-500'
-              }`}
-            >
-              {iAmVulnerable
-                ? '¡PROTÉGETE!'
-                : opponentVulnerable
-                ? '+2 AL RIVAL'
-                : 'REGLA UNO'}
-            </span>
-          </div>
-
-          {/* Pila de Descarte (Carta superior visible con slam y profundidad 3D) */}
-          <div className="flex flex-col items-center gap-2">
-            <div ref={discardPileRef} className="relative">
-              {/* Resplandor del color de la carta actual con pulso al cambiar */}
-              <div
-                className={`absolute inset-0 rounded-2xl filter blur-xl transition-all duration-500 ${
-                  isColorChanging
-                    ? 'animate-color-burst opacity-85 scale-125'
-                    : 'opacity-50'
-                }`}
-                style={{ backgroundColor: activeColorInfo.glow }}
-              />
-
-              {/* Cartas anteriores debajo en la pila de descarte para profundidad física */}
-              {discardHistory.map((oldCard, idx) => (
-                <div
-                  key={`prev-discard-${oldCard.id}-${idx}`}
-                  className="absolute inset-0 pointer-events-none opacity-60"
-                  style={{
-                    transform: `rotate(${getCardRotation(oldCard.id)}deg) translate(${
-                      idx === 0 ? -3 : 3
-                    }px, ${idx === 0 ? 2 : -2}px)`,
-                  }}
-                >
-                  <UnoCard card={oldCard} size="md" />
-                </div>
-              ))}
-
-              {/* Carta superior activa con animación de impacto / slam */}
-              <div
-                key={gameState.topCard.id}
-                className="relative shadow-2xl animate-card-slam"
-                style={{
-                  '--card-rot': `${getCardRotation(gameState.topCard.id)}deg`,
-                } as React.CSSProperties}
-              >
-                <UnoCard
-                  card={gameState.topCard}
-                  size="md"
-                  className="relative"
-                />
-              </div>
             </div>
-            <span
-              className={`text-[11px] font-bold uppercase tracking-wider ${activeColorInfo.text}`}
-            >
-              Descarte ({activeColorInfo.label})
-            </span>
+
+            {/* Pila de Descarte (Carta superior visible con slam y profundidad 3D) */}
+            <div className="flex flex-col items-center gap-2">
+              <div ref={discardPileRef} className="relative">
+                {/* Resplandor del color de la carta actual con pulso al cambiar */}
+                <div
+                  className={`absolute inset-0 rounded-2xl filter blur-xl transition-all duration-500 ${
+                    isColorChanging
+                      ? 'animate-color-burst opacity-85 scale-125'
+                      : 'opacity-50'
+                  }`}
+                  style={{ backgroundColor: activeColorInfo.glow }}
+                />
+
+                {/* Cartas anteriores debajo en la pila de descarte para profundidad física */}
+                {discardHistory.map((oldCard, idx) => (
+                  <div
+                    key={`prev-discard-${oldCard.id}-${idx}`}
+                    className="absolute inset-0 pointer-events-none opacity-60"
+                    style={{
+                      transform: `rotate(${getCardRotation(oldCard.id)}deg) translate(${
+                        idx === 0 ? -3 : 3
+                      }px, ${idx === 0 ? 2 : -2}px)`,
+                    }}
+                  >
+                    <UnoCard card={oldCard} size="md" />
+                  </div>
+                ))}
+
+                {/* Carta superior activa con animación de impacto / slam */}
+                <div
+                  key={gameState.topCard.id}
+                  className="relative shadow-2xl animate-card-slam"
+                  style={{
+                    '--card-rot': `${getCardRotation(gameState.topCard.id)}deg`,
+                  } as React.CSSProperties}
+                >
+                  <UnoCard
+                    card={gameState.topCard}
+                    size="md"
+                    className="relative"
+                  />
+                </div>
+              </div>
+              <span
+                className={`text-[11px] font-bold uppercase tracking-wider ${activeColorInfo.text}`}
+              >
+                Descarte ({activeColorInfo.label})
+              </span>
+            </div>
           </div>
+
+          {/* Flanco Derecho */}
+          {tableSeats.right.length > 0 && (
+            <div className="flex flex-col items-center justify-center gap-2 sm:gap-4 min-w-[55px] sm:min-w-[130px] md:min-w-[160px]">
+              {tableSeats.right.map((opponent) => renderOpponentSeat(opponent, 'right'))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -899,24 +1003,49 @@ export function GameBoard({
       {/* ============================================================ */}
       <div className="mt-2 flex flex-col items-center">
         <div className="flex items-center justify-between w-full max-w-4xl px-4 mb-2">
-          <div className="flex items-center gap-2">
-            <span className="text-xs sm:text-sm font-bold text-white uppercase tracking-wider">
-              Tu Mano
-            </span>
-            <span className="px-2 py-0.5 rounded-full text-xs font-mono font-bold bg-[#070c17] border border-[#182845] text-cyan-400">
-              {myHandCount} cartas
-            </span>
-            {myHandCount === 1 && (
-              iSaidUno ? (
-                <span className="px-2 py-0.5 rounded-full text-xs font-black bg-emerald-600 text-white shadow-[0_0_10px_#10b981]">
-                  ¡UNO PROTEGIDO! ✓
+          {/* Asiento del Jugador Local (Tú) */}
+          <div className="flex items-center gap-2.5">
+            <div className="relative">
+              <div
+                className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center font-black text-sm sm:text-base text-neutral-950 shadow-md ${
+                  isMyTurn ? 'ring-2 ring-yellow-400 ring-offset-2 ring-offset-[#070c17]' : ''
+                }`}
+              >
+                {currentPlayer?.name ? currentPlayer.name.charAt(0).toUpperCase() : 'T'}
+              </div>
+              {isHost && (
+                <span
+                  className="absolute -top-2 -left-1 text-xs drop-shadow"
+                  title="Anfitrión de la sala"
+                >
+                  👑
                 </span>
-              ) : (
-                <span className="px-2 py-0.5 rounded-full text-xs font-black bg-red-600 text-white animate-bounce shadow-[0_0_12px_#ef4444]">
-                  ¡CANTA UNO YA! ⚠️
+              )}
+            </div>
+
+            <div className="flex flex-col">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs sm:text-sm font-bold text-white uppercase tracking-wider">
+                  {currentPlayer?.name || 'Tú'} (Tú)
                 </span>
-              )
-            )}
+                <span className="px-2 py-0.5 rounded-full text-[11px] font-mono font-bold bg-[#070c17] border border-[#182845] text-cyan-400">
+                  {myHandCount} cartas
+                </span>
+              </div>
+              {myHandCount === 1 && (
+                <div className="mt-0.5">
+                  {iSaidUno ? (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-600 text-white shadow-[0_0_10px_#10b981]">
+                      ¡UNO PROTEGIDO! ✓
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-red-600 text-white animate-bounce shadow-[0_0_12px_#ef4444]">
+                      ¡CANTA UNO YA! ⚠️
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
           <span
