@@ -1,5 +1,5 @@
 import type { UnoGame } from '../game/game.manager';
-import type { PlayerGameState } from '../game/game.types';
+import type { PlayerGameState, CardColor } from '../game/game.types';
 
 export type RoomStatus = 'LOBBY' | 'PLAYING' | 'FINISHED';
 
@@ -55,6 +55,7 @@ export type WSClientMessage =
         pin: string;
         playerId: string;
         cardId: string;
+        chosenColor?: CardColor;
       };
     }
   | {

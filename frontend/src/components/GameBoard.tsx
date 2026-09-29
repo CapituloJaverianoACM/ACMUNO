@@ -10,7 +10,7 @@ interface GameBoardProps {
   currentPlayer: Player | null;
   isConnected: boolean;
   error?: string | null;
-  onPlayCard: (cardId: string) => void;
+  onPlayCard: (cardId: string, chosenColor?: CardColor) => void;
   onDrawCard: () => void;
   onSayUno?: () => void;
   onRestartGame: () => void;
@@ -87,6 +87,10 @@ export function GameBoard({
    */
   const canPlay = (card: Card) => {
     if (!isMyTurn || gameState.winner) return false;
+    // Comodines (+4 y wild) se pueden jugar siempre
+    if (card.color === 'wild' || card.type === 'wild4' || card.type === 'wild') {
+      return true;
+    }
     if (card.color === gameState.currentColor) return true;
     if (
       card.type === 'number' &&
@@ -145,6 +149,25 @@ export function GameBoard({
     gameState.turnTimeLimit > 0 && gameState.turnExpiresAt
       ? Math.min(100, Math.max(0, (timeLeft / gameState.turnTimeLimit) * 100))
       : 100;
+
+  // Selección de color para comodines (+4 / wild)
+  const [pendingWildCardId, setPendingWildCardId] = useState<string | null>(null);
+
+  const handleCardClick = (card: Card) => {
+    if (!canPlay(card)) return;
+    if (card.color === 'wild' || card.type === 'wild4' || card.type === 'wild') {
+      setPendingWildCardId(card.id);
+    } else {
+      onPlayCard(card.id);
+    }
+  };
+
+  const handleSelectColor = (color: CardColor) => {
+    if (pendingWildCardId) {
+      onPlayCard(pendingWildCardId, color);
+      setPendingWildCardId(null);
+    }
+  };
 
   return (
     <div className="w-full max-w-5xl flex flex-col justify-between min-h-[92vh] py-2 sm:py-4 px-2 sm:px-6 relative select-none">
@@ -563,7 +586,7 @@ export function GameBoard({
             return (
               <div
                 key={card.id}
-                onClick={() => playable && onPlayCard(card.id)}
+                onClick={() => playable && handleCardClick(card)}
                 className={`transition-all duration-200 transform ${
                   playable
                     ? '-translate-y-2 hover:-translate-y-6 hover:scale-115 cursor-pointer ring-2 ring-cyan-400/80 rounded-xl shadow-[0_8px_20px_rgba(0,180,216,0.35)]'
@@ -578,6 +601,61 @@ export function GameBoard({
           })}
         </div>
       </div>
+
+      {/* ============================================================ */}
+      {/* MODAL DE SELECCIÓN DE COLOR PARA COMODÍN +4                  */}
+      {/* ============================================================ */}
+      {pendingWildCardId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in">
+          <div className="cyber-card w-full max-w-sm rounded-3xl p-6 sm:p-7 text-center relative border-2 border-cyan-500/80 shadow-[0_0_50px_rgba(0,180,216,0.35)]">
+            <div className="text-3xl mb-2 animate-bounce">🎨</div>
+            <h3 className="text-xl sm:text-2xl font-black text-white tracking-wider mb-1">
+              ELIGE EL COLOR
+            </h3>
+            <p className="text-xs text-neutral-400 mb-6">
+              Selecciona el color que continuará la partida con tu Comodín +4.
+            </p>
+
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <button
+                onClick={() => handleSelectColor('red')}
+                className="py-3 px-4 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 text-white font-black text-sm uppercase tracking-wider hover:scale-105 active:scale-95 transition-all shadow-lg shadow-red-950/40 cursor-pointer border border-red-400/40 flex items-center justify-center gap-1.5"
+              >
+                <span>🔴</span>
+                <span>Rojo</span>
+              </button>
+              <button
+                onClick={() => handleSelectColor('blue')}
+                className="py-3 px-4 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 text-white font-black text-sm uppercase tracking-wider hover:scale-105 active:scale-95 transition-all shadow-lg shadow-blue-950/40 cursor-pointer border border-blue-400/40 flex items-center justify-center gap-1.5"
+              >
+                <span>🔵</span>
+                <span>Azul</span>
+              </button>
+              <button
+                onClick={() => handleSelectColor('green')}
+                className="py-3 px-4 rounded-xl bg-gradient-to-r from-green-600 to-emerald-600 text-white font-black text-sm uppercase tracking-wider hover:scale-105 active:scale-95 transition-all shadow-lg shadow-green-950/40 cursor-pointer border border-green-400/40 flex items-center justify-center gap-1.5"
+              >
+                <span>🟢</span>
+                <span>Verde</span>
+              </button>
+              <button
+                onClick={() => handleSelectColor('yellow')}
+                className="py-3 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 text-neutral-950 font-black text-sm uppercase tracking-wider hover:scale-105 active:scale-95 transition-all shadow-lg shadow-amber-950/40 cursor-pointer border border-yellow-400/40 flex items-center justify-center gap-1.5"
+              >
+                <span>🟡</span>
+                <span>Amarillo</span>
+              </button>
+            </div>
+
+            <button
+              onClick={() => setPendingWildCardId(null)}
+              className="w-full py-2 text-xs font-bold text-neutral-400 hover:text-white transition-colors cursor-pointer"
+            >
+              Cancelar jugada
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ============================================================ */}
       {/* MODAL DE VICTORIA / FIN DE PARTIDA                           */}

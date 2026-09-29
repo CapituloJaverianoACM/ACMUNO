@@ -89,6 +89,16 @@ export class UnoGame {
       }
     }
 
+    // 4 cartas Comodín +4 (Wild Draw 4)
+    for (let i = 0; i < 4; i++) {
+      deck.push({
+        id: crypto.randomUUID(),
+        color: 'wild',
+        type: 'wild4',
+        image: '/img/carta_mascuatro.png',
+      });
+    }
+
     return UnoGame.shuffle(deck);
   }
 
@@ -167,6 +177,11 @@ export class UnoGame {
    * Determina si una carta puede jugarse legalmente sobre la carta actual.
    */
   public canPlayCard(card: Card): boolean {
+    // 0. Cartas comodín (+4 y wild) se pueden jugar sobre cualquier carta
+    if (card.color === 'wild' || card.type === 'wild4' || card.type === 'wild') {
+      return true;
+    }
+
     const top = this.getTopCard();
     // 1. Mismo color activo
     if (card.color === this.currentColor) return true;
@@ -220,7 +235,9 @@ export class UnoGame {
   public playCard(
     playerId: string,
     cardId: string,
-    playerName: string
+    playerName: string,
+    chosenColor?: CardColor,
+    allPlayers?: Map<string, Player>
   ): { success: boolean; effectMessage: string; winner?: { id: string; name: string } } {
     if (this.winner) {
       throw new Error('La partida ya ha finalizado.');
@@ -248,7 +265,13 @@ export class UnoGame {
 
     // Colocar en la pila de descarte y actualizar color activo
     this.discardPile.push(card);
-    this.currentColor = card.color;
+    if (card.color === 'wild' || card.type === 'wild4' || card.type === 'wild') {
+      const validColors: CardColor[] = ['red', 'blue', 'green', 'yellow'];
+      this.currentColor =
+        chosenColor && validColors.includes(chosenColor) ? chosenColor : 'red';
+    } else {
+      this.currentColor = card.color;
+    }
 
     // Condición de Victoria: Se quedó sin cartas
     if (hand.length === 0) {
@@ -262,11 +285,7 @@ export class UnoGame {
     }
 
     // Si queda en 1 carta, debe decir UNO (aún no está protegido)
-    if (hand.length === 1) {
-      this.saidUno.delete(playerId);
-    } else {
-      this.saidUno.delete(playerId);
-    }
+    this.saidUno.delete(playerId);
 
     // Efectos de cartas especiales
     let effectMsg = '';
@@ -293,6 +312,8 @@ export class UnoGame {
       }
     } else if (card.type === 'draw2') {
       const victimId = this.getNextPlayerId(1);
+      const victim = allPlayers?.get(victimId);
+      const victimName = victim?.name || 'El siguiente jugador';
       this.replenishDrawPileIfNeeded();
       const victimHand = this.hands.get(victimId) || [];
       const drawnCards = this.drawPile.splice(0, Math.min(2, this.drawPile.length));
@@ -300,7 +321,20 @@ export class UnoGame {
       this.hands.set(victimId, victimHand);
       this.saidUno.delete(victimId);
       this.advanceTurn(2);
-      effectMsg = `💥 ${playerName} jugó un +2 ${colorName}. ¡El siguiente jugador roba 2 cartas y pierde su turno!`;
+      effectMsg = `💥 ${playerName} jugó un +2 ${colorName}. ¡${victimName} roba 2 cartas y pierde su turno!`;
+    } else if (card.type === 'wild4') {
+      const victimId = this.getNextPlayerId(1);
+      const victim = allPlayers?.get(victimId);
+      const victimName = victim?.name || 'El siguiente jugador';
+      this.replenishDrawPileIfNeeded();
+      const victimHand = this.hands.get(victimId) || [];
+      const drawnCards = this.drawPile.splice(0, Math.min(4, this.drawPile.length));
+      victimHand.push(...drawnCards);
+      this.hands.set(victimId, victimHand);
+      this.saidUno.delete(victimId);
+      this.advanceTurn(2);
+      const chosenColorName = this.getColorName(this.currentColor);
+      effectMsg = `💥 ¡${playerName} jugó un COMODÍN +4! Cambió el color a ${chosenColorName}. ¡${victimName} roba 4 cartas y pierde su turno!`;
     }
 
     if (hand.length === 1) {

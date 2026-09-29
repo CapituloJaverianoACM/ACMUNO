@@ -101,6 +101,7 @@ export type WSClientMessage =
         pin: string;
         playerId: string;
         cardId: string;
+        chosenColor?: CardColor;
       };
     }
   | {

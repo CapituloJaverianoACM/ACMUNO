@@ -187,7 +187,7 @@ export const app = new Elysia()
     '/api/rooms/:pin/play',
     ({ params, body, set }) => {
       try {
-        const { playerId, cardId } = body;
+        const { playerId, cardId, chosenColor } = body;
         const room = roomManager.getRoom(params.pin);
         if (!room || !room.game) {
           set.status = 400;
@@ -199,7 +199,13 @@ export const app = new Elysia()
           return { error: 'Jugador no encontrado' };
         }
 
-        const result = room.game.playCard(playerId, cardId, player.name);
+        const result = room.game.playCard(
+          playerId,
+          cardId,
+          player.name,
+          chosenColor as any,
+          room.players
+        );
         if (result.winner) {
           room.status = 'FINISHED';
           clearTurnTimer(params.pin);
@@ -219,6 +225,7 @@ export const app = new Elysia()
       body: t.Object({
         playerId: t.String(),
         cardId: t.String(),
+        chosenColor: t.Optional(t.String()),
       }),
     }
   )
@@ -542,14 +549,20 @@ export const app = new Elysia()
         }
 
         if (data.type === 'PLAY_CARD') {
-          const { pin, playerId, cardId } = data.payload;
+          const { pin, playerId, cardId, chosenColor } = data.payload;
           const room = roomManager.getRoom(pin);
           if (!room || !room.game) return;
           const player = room.players.get(playerId);
           if (!player) return;
 
           try {
-            const result = room.game.playCard(playerId, cardId, player.name);
+            const result = room.game.playCard(
+              playerId,
+              cardId,
+              player.name,
+              chosenColor,
+              room.players
+            );
             if (result.winner) {
               room.status = 'FINISHED';
               clearTurnTimer(pin);

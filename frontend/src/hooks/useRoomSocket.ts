@@ -7,6 +7,7 @@ import type {
   WSClientMessage,
   RoomSettings,
   PlayerGameState,
+  CardColor,
 } from '@/types/room';
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001/ws';
@@ -47,7 +48,7 @@ export function useRoomSocket(
   }, [pin, playerId, sendMessage]);
 
   const playCardAction = useCallback(
-    (cardId: string) => {
+    (cardId: string, chosenColor?: CardColor) => {
       if (!pin || !playerId) return;
       sendMessage({
         type: 'PLAY_CARD',
@@ -55,6 +56,7 @@ export function useRoomSocket(
           pin,
           playerId,
           cardId,
+          chosenColor,
         },
       });
     },
