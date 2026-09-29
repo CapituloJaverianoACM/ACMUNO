@@ -21,6 +21,51 @@ export interface RoomPublicState {
   players: Player[];
 }
 
+export type CardColor = 'red' | 'blue' | 'green' | 'yellow' | 'wild';
+
+export type CardType =
+  | 'number'
+  | 'skip'
+  | 'reverse'
+  | 'draw2'
+  | 'wild'
+  | 'wild4';
+
+export interface Card {
+  id: string;
+  color: CardColor;
+  type: CardType;
+  value?: number;
+  image: string;
+}
+
+export type GameDirection = 'CLOCKWISE' | 'COUNTER_CLOCKWISE';
+
+export interface OpponentState {
+  id: string;
+  name: string;
+  isHost: boolean;
+  isConnected: boolean;
+  cardCount: number;
+}
+
+export interface PlayerGameState {
+  pin: string;
+  myHand: Card[];
+  opponents: OpponentState[];
+  topCard: Card;
+  currentColor: CardColor;
+  currentTurnPlayerId: string;
+  direction: GameDirection;
+  drawPileCount: number;
+  turnTimeLimit: number;
+  winner?: {
+    id: string;
+    name: string;
+  };
+  lastActionMessage?: string;
+}
+
 export interface CreateRoomResponse {
   pin: string;
   hostPlayer: Player;
@@ -38,6 +83,35 @@ export type WSClientMessage =
       payload: {
         pin: string;
         playerId: string;
+      };
+    }
+  | {
+      type: 'START_GAME';
+      payload: {
+        pin: string;
+        hostId: string;
+      };
+    }
+  | {
+      type: 'PLAY_CARD';
+      payload: {
+        pin: string;
+        playerId: string;
+        cardId: string;
+      };
+    }
+  | {
+      type: 'DRAW_CARD';
+      payload: {
+        pin: string;
+        playerId: string;
+      };
+    }
+  | {
+      type: 'RESTART_GAME';
+      payload: {
+        pin: string;
+        hostId: string;
       };
     }
   | {
@@ -64,6 +138,10 @@ export type WSServerMessage =
   | {
       type: 'ROOM_STATE';
       payload: RoomPublicState;
+    }
+  | {
+      type: 'GAME_STATE';
+      payload: PlayerGameState;
     }
   | {
       type: 'PLAYER_CONNECTED';

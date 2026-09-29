@@ -60,6 +60,29 @@ export async function joinRoom(
   return res.json();
 }
 
+export async function startGame(
+  pin: string,
+  hostId: string
+): Promise<{ success: boolean; room: RoomPublicState }> {
+  const res = await fetch(
+    `${API_BASE_URL}/api/rooms/${pin.toUpperCase()}/start`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ hostId }),
+    }
+  );
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error || 'Error al iniciar la partida');
+  }
+
+  return res.json();
+}
+
 export async function kickPlayer(
   pin: string,
   hostId: string,

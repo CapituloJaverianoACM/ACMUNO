@@ -6,6 +6,7 @@ import type {
   WSServerMessage,
   WSClientMessage,
   RoomSettings,
+  PlayerGameState,
 } from '@/types/room';
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001/ws';
@@ -14,11 +15,12 @@ export function useRoomSocket(
   pin: string | null,
   playerId: string | null,
   options?: {
-    onKicked?: (reason: string) => void;
+    onKicked?: () => void;
   }
 ) {
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [roomState, setRoomState] = useState<RoomPublicState | null>(null);
+  const [gameState, setGameState] = useState<PlayerGameState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isKicked, setIsKicked] = useState<boolean>(false);
   const [kickReason, setKickReason] = useState<string | null>(null);
@@ -32,6 +34,54 @@ export function useRoomSocket(
       socketRef.current.send(JSON.stringify(message));
     }
   }, []);
+
+  const startGameAction = useCallback(() => {
+    if (!pin || !playerId) return;
+    sendMessage({
+      type: 'START_GAME',
+      payload: {
+        pin,
+        hostId: playerId,
+      },
+    });
+  }, [pin, playerId, sendMessage]);
+
+  const playCardAction = useCallback(
+    (cardId: string) => {
+      if (!pin || !playerId) return;
+      sendMessage({
+        type: 'PLAY_CARD',
+        payload: {
+          pin,
+          playerId,
+          cardId,
+        },
+      });
+    },
+    [pin, playerId, sendMessage]
+  );
+
+  const drawCardAction = useCallback(() => {
+    if (!pin || !playerId) return;
+    sendMessage({
+      type: 'DRAW_CARD',
+      payload: {
+        pin,
+        playerId,
+      },
+    });
+  }, [pin, playerId, sendMessage]);
+
+  const restartGameAction = useCallback(() => {
+    if (!pin || !playerId) return;
+    sendMessage({
+      type: 'RESTART_GAME',
+      payload: {
+        pin,
+        hostId: playerId,
+      },
+    });
+  }, [pin, playerId, sendMessage]);
 
   const kickPlayerAction = useCallback(
     (targetPlayerId: string) => {
@@ -89,12 +139,19 @@ export function useRoomSocket(
         const msg = JSON.parse(event.data) as WSServerMessage;
         if (msg.type === 'ROOM_STATE') {
           setRoomState(msg.payload);
+          if (msg.payload.status === 'LOBBY') {
+            setGameState(null); // Limpiar estado al reiniciar partida
+          }
+        } else if (msg.type === 'GAME_STATE') {
+          setGameState(msg.payload);
         } else if (msg.type === 'KICKED') {
           setIsKicked(true);
           setKickReason(msg.payload.reason);
-          onKickedRef.current?.(msg.payload.reason);
+          onKickedRef.current?.();
         } else if (msg.type === 'ERROR') {
           setError(msg.payload.message);
+          // Borrar error tras 4 segundos
+          setTimeout(() => setError(null), 4000);
         }
       } catch (e) {
         console.error('Error parseando mensaje WS en frontend:', e);
@@ -125,10 +182,15 @@ export function useRoomSocket(
   return {
     isConnected,
     roomState,
+    gameState,
     error,
     isKicked,
     kickReason,
     sendMessage,
+    startGame: startGameAction,
+    playCard: playCardAction,
+    drawCard: drawCardAction,
+    restartGame: restartGameAction,
     kickPlayer: kickPlayerAction,
     updateSettings: updateSettingsAction,
   };

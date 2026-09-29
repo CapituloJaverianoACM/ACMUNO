@@ -16,6 +16,39 @@ interface ConnectionMeta {
 const connections = new Map<unknown, ConnectionMeta>();
 const playerSockets = new Map<string, unknown>();
 
+/**
+ * Difunde de forma segura el estado de juego a cada jugador.
+ * Cada cliente recibe su propia mano y solo el conteo de cartas de los rivales.
+ */
+function broadcastGameState(pin: string) {
+  const room = roomManager.getRoom(pin);
+  if (!room || !room.game) return;
+
+  for (const player of room.players.values()) {
+    const targetWs = playerSockets.get(player.id) as
+      | { send: (msg: string) => void }
+      | undefined;
+
+    if (targetWs) {
+      const playerGameState = room.game.getPlayerState(player.id, room.players);
+      targetWs.send(
+        JSON.stringify({
+          type: 'GAME_STATE',
+          payload: playerGameState,
+        } satisfies WSServerMessage)
+      );
+    }
+  }
+
+  // Sincronizar el estado público de la sala
+  const roomTopic = `room:${pin.toUpperCase()}`;
+  const roomStateMessage: WSServerMessage = {
+    type: 'ROOM_STATE',
+    payload: roomManager.toPublicState(room),
+  };
+  app.server?.publish(roomTopic, JSON.stringify(roomStateMessage));
+}
+
 export const app = new Elysia()
   .use(
     cors({
@@ -83,6 +116,137 @@ export const app = new Elysia()
     }
   )
   .post(
+    '/api/rooms/:pin/start',
+    ({ params, body, set }) => {
+      try {
+        const { hostId } = body;
+        roomManager.startGame(params.pin, hostId);
+        broadcastGameState(params.pin);
+        const room = roomManager.getRoom(params.pin)!;
+        return { success: true, room: roomManager.toPublicState(room) };
+      } catch (err: unknown) {
+        set.status = 400;
+        return {
+          error:
+            err instanceof Error ? err.message : 'Error al iniciar la partida',
+        };
+      }
+    },
+    {
+      body: t.Object({
+        hostId: t.String(),
+      }),
+    }
+  )
+  .post(
+    '/api/rooms/:pin/play',
+    ({ params, body, set }) => {
+      try {
+        const { playerId, cardId } = body;
+        const room = roomManager.getRoom(params.pin);
+        if (!room || !room.game) {
+          set.status = 400;
+          return { error: 'Partida no iniciada' };
+        }
+        const player = room.players.get(playerId);
+        if (!player) {
+          set.status = 400;
+          return { error: 'Jugador no encontrado' };
+        }
+
+        const result = room.game.playCard(playerId, cardId, player.name);
+        if (result.winner) {
+          room.status = 'FINISHED';
+        }
+        broadcastGameState(params.pin);
+        return { success: true, result };
+      } catch (err: unknown) {
+        set.status = 400;
+        return {
+          error: err instanceof Error ? err.message : 'Error al jugar carta',
+        };
+      }
+    },
+    {
+      body: t.Object({
+        playerId: t.String(),
+        cardId: t.String(),
+      }),
+    }
+  )
+  .post(
+    '/api/rooms/:pin/draw',
+    ({ params, body, set }) => {
+      try {
+        const { playerId } = body;
+        const room = roomManager.getRoom(params.pin);
+        if (!room || !room.game) {
+          set.status = 400;
+          return { error: 'Partida no iniciada' };
+        }
+        const player = room.players.get(playerId);
+        if (!player) {
+          set.status = 400;
+          return { error: 'Jugador no encontrado' };
+        }
+
+        const result = room.game.drawCard(playerId, player.name);
+        broadcastGameState(params.pin);
+        return { success: true, result };
+      } catch (err: unknown) {
+        set.status = 400;
+        return {
+          error: err instanceof Error ? err.message : 'Error al robar carta',
+        };
+      }
+    },
+    {
+      body: t.Object({
+        playerId: t.String(),
+      }),
+    }
+  )
+  .post(
+    '/api/rooms/:pin/restart',
+    ({ params, body, set }) => {
+      try {
+        const { hostId } = body;
+        const room = roomManager.getRoom(params.pin);
+        if (!room) {
+          set.status = 404;
+          return { error: 'Sala no encontrada' };
+        }
+        if (room.hostId !== hostId) {
+          set.status = 403;
+          return { error: 'Solo el anfitrión puede reiniciar' };
+        }
+
+        room.status = 'LOBBY';
+        room.game = undefined;
+
+        const roomTopic = `room:${params.pin.toUpperCase()}`;
+        const stateMessage: WSServerMessage = {
+          type: 'ROOM_STATE',
+          payload: roomManager.toPublicState(room),
+        };
+        app.server?.publish(roomTopic, JSON.stringify(stateMessage));
+
+        return { success: true, room: roomManager.toPublicState(room) };
+      } catch (err: unknown) {
+        set.status = 400;
+        return {
+          error:
+            err instanceof Error ? err.message : 'Error al reiniciar la sala',
+        };
+      }
+    },
+    {
+      body: t.Object({
+        hostId: t.String(),
+      }),
+    }
+  )
+  .post(
     '/api/rooms/:pin/kick',
     ({ params, body, set }) => {
       try {
@@ -93,7 +257,6 @@ export const app = new Elysia()
           targetPlayerId
         );
 
-        // Notificar y desconectar al socket del jugador expulsado
         const targetWs = playerSockets.get(targetPlayerId) as
           | { send: (msg: string) => void; close: () => void }
           | undefined;
@@ -115,7 +278,6 @@ export const app = new Elysia()
           playerSockets.delete(targetPlayerId);
         }
 
-        // Notificar al resto de la sala
         const roomTopic = `room:${params.pin.toUpperCase()}`;
         const stateMessage: WSServerMessage = {
           type: 'ROOM_STATE',
@@ -150,7 +312,6 @@ export const app = new Elysia()
           settings
         );
 
-        // Notificar a todos en la sala del cambio de configuración
         const roomTopic = `room:${params.pin.toUpperCase()}`;
         const stateMessage: WSServerMessage = {
           type: 'ROOM_STATE',
@@ -220,17 +381,14 @@ export const app = new Elysia()
             return;
           }
 
-          // Asignar datos de la sesión al socket
           meta.pin = room.pin;
           meta.playerId = player.id;
           connections.set(ws.raw, meta);
           playerSockets.set(player.id, ws);
 
-          // Suscribir socket al canal específico de la sala
           const roomTopic = `room:${room.pin}`;
           ws.subscribe(roomTopic);
 
-          // Marcar al jugador como conectado
           roomManager.setPlayerConnection(room.pin, player.id, true);
 
           const publicState = roomManager.toPublicState(room);
@@ -239,9 +397,106 @@ export const app = new Elysia()
             payload: publicState,
           };
 
-          // Notificar al propio cliente y al resto de la sala
           ws.send(JSON.stringify(stateMessage));
           app.server?.publish(roomTopic, JSON.stringify(stateMessage));
+
+          // Si la partida está en curso, sincronizarle su mano y tablero
+          if (room.status === 'PLAYING' && room.game) {
+            const playerGameState = room.game.getPlayerState(
+              player.id,
+              room.players
+            );
+            ws.send(
+              JSON.stringify({
+                type: 'GAME_STATE',
+                payload: playerGameState,
+              } satisfies WSServerMessage)
+            );
+          }
+        }
+
+        if (data.type === 'START_GAME') {
+          const { pin, hostId } = data.payload;
+          try {
+            roomManager.startGame(pin, hostId);
+            broadcastGameState(pin);
+          } catch (err: unknown) {
+            ws.send(
+              JSON.stringify({
+                type: 'ERROR',
+                payload: {
+                  message:
+                    err instanceof Error
+                      ? err.message
+                      : 'Error al iniciar la partida',
+                },
+              } satisfies WSServerMessage)
+            );
+          }
+        }
+
+        if (data.type === 'PLAY_CARD') {
+          const { pin, playerId, cardId } = data.payload;
+          const room = roomManager.getRoom(pin);
+          if (!room || !room.game) return;
+          const player = room.players.get(playerId);
+          if (!player) return;
+
+          try {
+            const result = room.game.playCard(playerId, cardId, player.name);
+            if (result.winner) {
+              room.status = 'FINISHED';
+            }
+            broadcastGameState(pin);
+          } catch (err: unknown) {
+            ws.send(
+              JSON.stringify({
+                type: 'ERROR',
+                payload: {
+                  message:
+                    err instanceof Error ? err.message : 'Jugada inválida',
+                },
+              } satisfies WSServerMessage)
+            );
+          }
+        }
+
+        if (data.type === 'DRAW_CARD') {
+          const { pin, playerId } = data.payload;
+          const room = roomManager.getRoom(pin);
+          if (!room || !room.game) return;
+          const player = room.players.get(playerId);
+          if (!player) return;
+
+          try {
+            room.game.drawCard(playerId, player.name);
+            broadcastGameState(pin);
+          } catch (err: unknown) {
+            ws.send(
+              JSON.stringify({
+                type: 'ERROR',
+                payload: {
+                  message:
+                    err instanceof Error ? err.message : 'Error al robar carta',
+                },
+              } satisfies WSServerMessage)
+            );
+          }
+        }
+
+        if (data.type === 'RESTART_GAME') {
+          const { pin, hostId } = data.payload;
+          const room = roomManager.getRoom(pin);
+          if (room && room.hostId === hostId) {
+            room.status = 'LOBBY';
+            room.game = undefined;
+            const roomTopic = `room:${pin.toUpperCase()}`;
+            const stateMessage: WSServerMessage = {
+              type: 'ROOM_STATE',
+              payload: roomManager.toPublicState(room),
+            };
+            app.server?.publish(roomTopic, JSON.stringify(stateMessage));
+          }
         }
 
         if (data.type === 'KICK_PLAYER') {

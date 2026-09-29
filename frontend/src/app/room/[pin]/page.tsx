@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { useRoomSocket } from '@/hooks/useRoomSocket';
 import { joinRoom } from '@/lib/api';
 import { QrModal } from '@/components/QrModal';
+import { GameBoard } from '@/components/GameBoard';
 import type { Player } from '@/types/room';
 
 interface RoomPageProps {
@@ -81,9 +82,14 @@ export default function RoomPage({ params }: RoomPageProps) {
   const {
     isConnected,
     roomState,
+    gameState,
     error,
     isKicked,
     kickReason,
+    startGame,
+    playCard,
+    drawCard,
+    restartGame,
     kickPlayer,
     updateSettings,
   } = useRoomSocket(pin, currentPlayer?.id || null, {
@@ -111,6 +117,24 @@ export default function RoomPage({ params }: RoomPageProps) {
       setTimeout(() => setCopiedLink(false), 2000);
     }
   };
+
+  // Si la partida ya inició y tenemos el estado del jugador, renderizar el tablero de juego
+  if (gameState && (roomState?.status === 'PLAYING' || roomState?.status === 'FINISHED' || gameState.myHand.length > 0)) {
+    return (
+      <main className="min-h-screen bg-[#060913] text-white flex flex-col items-center justify-center p-2 sm:p-4 relative overflow-hidden select-none">
+        <GameBoard
+          gameState={gameState}
+          currentPlayer={currentPlayer}
+          isConnected={isConnected}
+          error={error}
+          onPlayCard={playCard}
+          onDrawCard={drawCard}
+          onRestartGame={restartGame}
+          onExit={() => router.push('/')}
+        />
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-[#060913] text-white flex flex-col items-center justify-between p-4 sm:p-6 md:p-10 relative overflow-hidden select-none">
@@ -467,13 +491,14 @@ export default function RoomPage({ params }: RoomPageProps) {
           <div className="mt-5 pt-4 border-t border-[#16243d]">
             {isHost ? (
               <button
+                onClick={startGame}
                 disabled={(roomState?.players.length ?? 0) < 2}
                 className="w-full py-3.5 px-4 btn-retro-red text-white font-bold rounded-2xl text-base tracking-wide flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-red-950/40 disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none"
               >
                 {(roomState?.players.length ?? 0) < 2 ? (
                   <span>Esperando mínimo 2 jugadores...</span>
                 ) : (
-                  <span>🚀 Iniciar Partida (Etapa 3)</span>
+                  <span>🚀 Iniciar Partida</span>
                 )}
               </button>
             ) : (

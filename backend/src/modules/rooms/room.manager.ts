@@ -4,6 +4,7 @@ import type {
   RoomPublicState,
   RoomSettings,
 } from './room.types';
+import { UnoGame } from '../game/game.manager';
 
 export class RoomManager {
   private rooms: Map<string, Room> = new Map();
@@ -105,6 +106,36 @@ export class RoomManager {
       player: newPlayer,
       room: this.toPublicState(room),
     };
+  }
+
+  /**
+   * Inicia la partida de UNO (exclusivo para el anfitrión).
+   */
+  public startGame(pin: string, hostId: string): UnoGame {
+    const room = this.getRoom(pin);
+    if (!room) {
+      throw new Error(`La sala con PIN ${pin} no existe.`);
+    }
+
+    if (room.hostId !== hostId) {
+      throw new Error('Solo el anfitrión puede iniciar la partida.');
+    }
+
+    if (room.players.size < 2) {
+      throw new Error('Se necesitan al menos 2 jugadores para iniciar la partida.');
+    }
+
+    if (room.status === 'PLAYING') {
+      throw new Error('La partida ya está en curso.');
+    }
+
+    const game = new UnoGame(room.pin, room.settings.turnTimeLimit);
+    game.start(Array.from(room.players.values()));
+
+    room.status = 'PLAYING';
+    room.game = game;
+
+    return game;
   }
 
   /**

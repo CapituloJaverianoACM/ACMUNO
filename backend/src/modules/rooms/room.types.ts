@@ -1,3 +1,6 @@
+import type { UnoGame } from '../game/game.manager';
+import type { PlayerGameState } from '../game/game.types';
+
 export type RoomStatus = 'LOBBY' | 'PLAYING' | 'FINISHED';
 
 export interface RoomSettings {
@@ -19,6 +22,7 @@ export interface Room {
   createdAt: number;
   settings: RoomSettings;
   players: Map<string, Player>;
+  game?: UnoGame;
 }
 
 export interface RoomPublicState {
@@ -36,6 +40,35 @@ export type WSClientMessage =
       payload: {
         pin: string;
         playerId: string;
+      };
+    }
+  | {
+      type: 'START_GAME';
+      payload: {
+        pin: string;
+        hostId: string;
+      };
+    }
+  | {
+      type: 'PLAY_CARD';
+      payload: {
+        pin: string;
+        playerId: string;
+        cardId: string;
+      };
+    }
+  | {
+      type: 'DRAW_CARD';
+      payload: {
+        pin: string;
+        playerId: string;
+      };
+    }
+  | {
+      type: 'RESTART_GAME';
+      payload: {
+        pin: string;
+        hostId: string;
       };
     }
   | {
@@ -62,6 +95,10 @@ export type WSServerMessage =
   | {
       type: 'ROOM_STATE';
       payload: RoomPublicState;
+    }
+  | {
+      type: 'GAME_STATE';
+      payload: PlayerGameState;
     }
   | {
       type: 'PLAYER_CONNECTED';
