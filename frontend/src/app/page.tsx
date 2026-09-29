@@ -142,56 +142,7 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen bg-[#060913] text-white flex flex-col items-center justify-between p-4 sm:p-6 md:p-10 relative overflow-hidden select-none">
-      {/* ============================================================ */}
-      {/* DETALLES DECORATIVOS CIBERNÉTICOS & ESQUINAS                */}
-      {/* ============================================================ */}
-
-      {/* Esquina superior izquierda con matriz de puntos ::: */}
-      <div className="absolute top-4 left-4 sm:top-6 sm:left-6 flex flex-col gap-1 pointer-events-none opacity-60">
-        <div className="w-8 h-8 border-t-2 border-l-2 border-[#1f365d]" />
-        <div className="grid grid-cols-3 gap-1 w-6 mt-1 ml-1">
-          <div className="w-1 h-1 bg-[#1f365d] rounded-full" />
-          <div className="w-1 h-1 bg-[#1f365d] rounded-full" />
-          <div className="w-1 h-1 bg-[#1f365d] rounded-full" />
-          <div className="w-1 h-1 bg-[#1f365d] rounded-full" />
-          <div className="w-1 h-1 bg-[#1f365d] rounded-full" />
-          <div className="w-1 h-1 bg-[#1f365d] rounded-full" />
-        </div>
-      </div>
-
-      {/* Esquina superior derecha */}
-      <div className="absolute top-4 right-4 sm:top-6 sm:right-6 pointer-events-none opacity-60">
-        <div className="w-8 h-8 border-t-2 border-r-2 border-[#1f365d]" />
-      </div>
-
-      {/* Esquina inferior izquierda */}
-      <div className="absolute bottom-4 left-4 sm:bottom-6 sm:left-6 pointer-events-none opacity-60">
-        <div className="w-8 h-8 border-b-2 border-l-2 border-[#1f365d]" />
-      </div>
-
-      {/* Esquina inferior derecha con puntos ... */}
-      <div className="absolute bottom-4 right-4 sm:bottom-6 sm:right-6 pointer-events-none opacity-60 flex flex-col items-end gap-1">
-        <div className="flex gap-1 mb-1 mr-1">
-          <div className="w-1 h-1 bg-[#1f365d] rounded-full" />
-          <div className="w-1 h-1 bg-[#1f365d] rounded-full" />
-          <div className="w-1 h-1 bg-[#1f365d] rounded-full" />
-        </div>
-        <div className="w-8 h-8 border-b-2 border-r-2 border-[#1f365d]" />
-      </div>
-
-      {/* Cubos de píxeles de colores flotantes */}
-      <div className="absolute top-28 left-[13%] flex flex-col gap-1 pointer-events-none">
-        <div className="w-2.5 h-2.5 bg-[#e52837] shadow-[0_0_8px_#e52837]" />
-        <div className="w-2.5 h-2.5 bg-[#f59e0b] ml-3 shadow-[0_0_8px_#f59e0b]" />
-      </div>
-      <div className="absolute top-1/2 left-[14%] flex flex-col gap-1 pointer-events-none">
-        <div className="w-2.5 h-2.5 bg-[#0084ff] shadow-[0_0_8px_#0084ff]" />
-        <div className="w-2.5 h-2.5 bg-[#22c55e] ml-2 shadow-[0_0_8px_#22c55e]" />
-      </div>
-      <div className="absolute top-40 right-[15%] w-2.5 h-2.5 bg-[#f59e0b] shadow-[0_0_8px_#f59e0b] pointer-events-none" />
-      <div className="absolute bottom-28 right-[17%] w-2.5 h-2.5 bg-[#f59e0b] shadow-[0_0_8px_#f59e0b] pointer-events-none" />
-
+    <main className="min-h-screen bg-transparent text-white flex flex-col items-center justify-between p-4 sm:p-6 md:p-10 relative overflow-hidden select-none">
       {/* ============================================================ */}
       {/* 4 CARTAS DE UNO EN LAS ESQUINAS                             */}
       {/* ============================================================ */}

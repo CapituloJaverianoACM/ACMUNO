@@ -122,7 +122,7 @@ export default function RoomPage({ params }: RoomPageProps) {
   // Si la partida ya inició y tenemos el estado del jugador, renderizar el tablero de juego
   if (gameState && (roomState?.status === 'PLAYING' || roomState?.status === 'FINISHED' || gameState.myHand.length > 0)) {
     return (
-      <main className="min-h-screen bg-[#060913] text-white flex flex-col items-center justify-center p-2 sm:p-4 relative overflow-hidden select-none">
+      <main className="min-h-screen bg-transparent text-white flex flex-col items-center justify-center p-2 sm:p-4 relative overflow-hidden select-none">
         <GameBoard
           gameState={gameState}
           currentPlayer={currentPlayer}
@@ -139,21 +139,7 @@ export default function RoomPage({ params }: RoomPageProps) {
   }
 
   return (
-    <main className="min-h-screen bg-[#060913] text-white flex flex-col items-center justify-between p-4 sm:p-6 md:p-10 relative overflow-hidden select-none">
-      {/* Esquinas decorativas */}
-      <div className="absolute top-4 left-4 sm:top-6 sm:left-6 flex flex-col gap-1 pointer-events-none opacity-60">
-        <div className="w-8 h-8 border-t-2 border-l-2 border-[#1f365d]" />
-      </div>
-      <div className="absolute top-4 right-4 sm:top-6 sm:right-6 pointer-events-none opacity-60">
-        <div className="w-8 h-8 border-t-2 border-r-2 border-[#1f365d]" />
-      </div>
-      <div className="absolute bottom-4 left-4 sm:bottom-6 sm:left-6 pointer-events-none opacity-60">
-        <div className="w-8 h-8 border-b-2 border-l-2 border-[#1f365d]" />
-      </div>
-      <div className="absolute bottom-4 right-4 sm:bottom-6 sm:right-6 pointer-events-none opacity-60">
-        <div className="w-8 h-8 border-b-2 border-r-2 border-[#1f365d]" />
-      </div>
-
+    <main className="min-h-screen bg-transparent text-white flex flex-col items-center justify-between p-4 sm:p-6 md:p-10 relative overflow-hidden select-none">
       {/* Cartas de fondo */}
       <div className="absolute -top-6 -left-6 sm:top-2 sm:left-2 md:top-8 md:left-6 z-0 pointer-events-none opacity-60 sm:opacity-90">
         <Image

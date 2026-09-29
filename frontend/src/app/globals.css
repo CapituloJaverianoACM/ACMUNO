@@ -9,9 +9,22 @@
 
 body {
   background-color: var(--background);
+  background-image: url('/img/background.png');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
   color: var(--foreground);
   font-family: 'Chakra Petch', sans-serif, system-ui;
   overflow-x: hidden;
+  min-height: 100vh;
+}
+
+@supports (-webkit-touch-callout: none) {
+  /* Soporte para iOS Safari donde background-attachment: fixed causa zoom indeseado */
+  body {
+    background-attachment: scroll;
+  }
 }
 
 /* Estilos de botones 3D estilo retro/arcade del mockup */
